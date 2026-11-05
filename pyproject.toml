@@ -1,0 +1,24 @@
+[project]
+name = "comfyui-llm-api"
+version = "1.0.0"
+description = "ComfyUI node that calls any OpenAI-compatible LLM gateway (CometAPI, Grokified, self-hosted) with a provider dropdown."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "CraftBlack" }]
+keywords = ["comfyui", "llm", "openai", "cometapi", "grokified", "vision", "reasoning"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = ["requests>=2.28", "Pillow>=9.0", "numpy>=1.24"]
+
+[project.urls]
+Repository = "https://github.com/CraftBlack/ComfyUI-LLM-API"
+Issues = "https://github.com/CraftBlack/ComfyUI-LLM-API/issues"
+
+[tool.comfy]
+PublisherId = "CraftBlack"
+DisplayName = "ComfyUI LLM API (Multi-Provider)"
+Icon = ""

@@ -1,0 +1,4 @@
+# ComfyUI already ships every one of these; listed so pip users can see the surface.
+requests>=2.28
+Pillow>=9.0
+numpy>=1.24

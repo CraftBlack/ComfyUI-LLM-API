@@ -5,8 +5,8 @@ provider from a dropdown — the model list and the reasoning levels follow it
 automatically.
 
 Originally built as the Grokified-specific node, generalised so the same
-workflow can run on **CometAPI**, **Grokified**, or a **local server** without
-rewiring anything.
+workflow can run on **CometAPI**, **Grokified**, **Coarena**, or a **local
+server** without rewiring anything.
 
 ```
 provider ▾  CometAPI (cometapi.com)
@@ -56,12 +56,14 @@ A key is resolved in this order:
 |---|---|---|
 | CometAPI | `COMETAPI_API_KEY` | <https://cometapi.com> → API keys |
 | Grokified | `GROKIFIED_API_KEY` | <https://grokified.com> |
+| Coarena | `COARENA_API_KEY` | <https://coarena.ai/account/api/keys> |
 | Custom | `LLM_API_KEY` | optional; local servers usually need none |
 
 Windows (persists for the user account):
 
 ```powershell
 [Environment]::SetEnvironmentVariable("COMETAPI_API_KEY", "sk-...", "User")
+[Environment]::SetEnvironmentVariable("COARENA_API_KEY", "coa_...", "User")
 ```
 
 Linux / macOS / WSL:
@@ -97,14 +99,17 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 ## Providers
 
-| | CometAPI | Grokified | Custom |
-|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | anything |
-| Default model | `grok-4.7` | `grok-4.7` | `local-model` |
-| Catalogue size | 472 ids, **15** chat-capable | account-dependent | whatever it serves |
-| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | all |
-| Vision (data-URI images) | yes | yes | depends |
-| Streaming | yes | yes | depends |
+| | CometAPI | Grokified | Coarena | Custom |
+|---|---|---|---|---|
+| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | anything |
+| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `local-model` |
+| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | whatever it serves |
+| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | all |
+| Vision (data-URI images) | yes | yes | yes | depends |
+| Streaming | yes | yes | yes (usage via `stream_options`) | depends |
+
+Coarena's `/models` entry advertises the efforts `low` … `xhigh`, but live calls
+also accept `minimal` and `max`; the node offers all of them.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -217,6 +222,10 @@ reasoning tokens but sends no text, `USAGE_JSON` gains:
 and the same line is written to the ComfyUI console. `REASONING` is always
 exactly what the gateway sent — never synthesised, never re-requested.
 
+Coarena behaves the same way: several measured calls billed reasoning tokens
+with 0 characters of `reasoning`/`reasoning_content` (e.g. `low`: 40 tokens, 0
+characters).
+
 <details>
 <summary><b>Grokified</b></summary>
 
@@ -225,6 +234,27 @@ exactly what the gateway sent — never synthesised, never re-requested.
 | Reasoning levels are `low/medium/high/xhigh` | <https://grokified.com/docs/reasoning> — there is no `none` |
 | Vision takes `image_url` data URIs, ≤ 20 MiB, jpg/png | <https://grokified.com/docs/vision> |
 | An unfunded account answers **HTTP 402** | `Grokified is for paying customers. Top up ($5 minimum) ...` — surfaced verbatim, never retried |
+
+</details>
+
+<details>
+<summary><b>Coarena</b> — <code>grok-4-7</code>, 2026-11-14</summary>
+
+| Fact | Evidence |
+|---|---|
+| `grok-4-7` is the canonical id | `/models` lists it with `aliases: ["grok-4.7", "xai/grok-4-7", ...]`; both alias forms also answer 200 |
+| the model is vision + reasoning capable | `/models` entry: `capabilities: {vision: true, reasoning_text: true, efforts: [low, medium, high, xhigh]}` |
+| `/models` needs no key | `GET /api/v1/models` returned 200 without an Authorization header |
+| context 128k, output cap 16 384 | `/models` entry: `context_length: 128000`, `max_completion_tokens: 16384` |
+| effort `minimal` … `max` are accepted | HTTP 200 for `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| the bare word `default` is rejected | HTTP 400 `reasoning_effort must be one of "none", "minimal", ...` — the node strips it instead of sending it |
+| `max_completion_tokens` caps the **visible** answer | `max_completion_tokens: 8` returned 35 completion tokens = 27 reasoning + 8 content |
+| streaming only reports usage when asked | the SSE stream carried no `usage` until `stream_options: {"include_usage": true}` was sent |
+| reasoning streams as `delta.reasoning` **and** `delta.reasoning_content` | both keys carry the same text |
+| vision works with data URIs | a 64×64 red PNG returned `Red` |
+| unknown model = **HTTP 404** `model_not_found` | classified as fatal, so it is not retried |
+| bad key = HTTP 401 `invalid_api_key` | `{"error":{"message":"That API key is not valid. ...","code":"invalid_api_key"}}` |
+| free tier limits | $5 of model use per day, 30 requests/min, 2 concurrent |
 
 </details>
 
@@ -237,7 +267,7 @@ exactly what the gateway sent — never synthesised, never re-requested.
 | `No API key for ...` | Set the environment variable **and restart ComfyUI**, or paste the key into `api_key`. |
 | `HTTP 402` | The account has no credit. Top up, or switch the `provider` dropdown. |
 | `HTTP 401 invalid token` | Wrong or revoked key for that provider. |
-| `model_not_found` (HTTP 503) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
+| `model_not_found` (HTTP 503 CometAPI / 404 Coarena) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
 | Dropdown is empty / status shows `⚠` | `/comfyui_llm_api/models` could not reach the gateway; the static fallback list is shown and the reason is printed in the node. |
 | Output cut off | Raise `max_tokens`; the console logs a warning when `finish_reason` is `length`. |
@@ -273,19 +303,20 @@ pack when two custom nodes register the same route, and generic names like
 
 ## Tests
 
-Three suites, all green on ComfyUI 0.43.0 / frontend 1.57.6.
+Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 226 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 242 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
 COMETAPI_API_KEY=sk-... python tests/probe_reasoning_stream.py   # trace / transport matrix
+COARENA_API_KEY=coa_... python tests/probe_coarena.py      # Coarena capability probe
 
-# 49 checks - queues real prompts through a running ComfyUI
+# 54 checks - queues real prompts through a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
-# 54 checks - drives a real browser against a running ComfyUI
+# 55 checks - drives a real browser against a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
@@ -295,8 +326,9 @@ node contract. It also fails if an API key is ever committed.
 
 **`tests/live_node_test.py`** builds real prompts, queues them through
 `POST /prompt` and reads `GET /history/<id>` back. It covers text, streaming,
-vision through `LoadImage`, the model-list node, a bad model id, a bad key, an
-unfunded Grokified account and `enable_processing = false`.
+vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
+Grokified 402 path when the account is unfunded, a Coarena streamed call that
+still reports usage, and `enable_processing = false`.
 
 **`tests/browser/live_test.js`** is the only thing that can prove the frontend
 half works: it loads ComfyUI in Chromium, injects a workflow whose saved

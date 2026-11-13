@@ -124,13 +124,17 @@ async function launch() {
             return { status: r.status, body: await r.json() };
         });
         eq("providers route status", providers.status, 200);
-        eq("provider count", providers.body.providers.length, 3);
+        eq("provider count", providers.body.providers.length, 4);
         eq(
             "provider ids",
             providers.body.providers.map((p) => p.id),
-            ["cometapi", "grokified", "custom"],
+            ["cometapi", "grokified", "coarena", "custom"],
         );
         eq("default provider", providers.body.defaultProvider, "cometapi");
+        check(
+            "coarena is offered",
+            providers.body.providers.some((p) => p.id === "coarena" && p.baseUrl === "https://coarena.ai/api/v1"),
+        );
 
         const models = await page.evaluate(async () => {
             const r = await fetch("/comfyui_llm_api/models?provider=cometapi");
@@ -155,8 +159,12 @@ async function launch() {
             const r = await fetch("/comfyui_llm_api/models?provider=grokified");
             return await r.json();
         });
-        eq("grokified falls back to its static list", grokifiedModels.source, "fallback");
-        check("fallback list still has models", grokifiedModels.models.length > 0);
+        check("grokified catalogue is served", grokifiedModels.models.length > 0);
+        check(
+            "grokified source is labelled",
+            ["api", "fallback"].includes(grokifiedModels.source),
+            grokifiedModels.source,
+        );
 
         // --------------------------------------------------------------- //
         console.log("== workflow load: provider restored from the file ==");
@@ -201,7 +209,11 @@ async function launch() {
 
         eq("provider restored from the workflow", summary.provider, "Grokified API (grokified.com)");
         eq("saved model kept (valid for grokified)", summary.model, "grok-4.6");
-        check("model combo narrowed to grokified", summary.modelValues.length <= 12, JSON.stringify(summary.modelValues));
+        check(
+            "model combo narrowed to grokified",
+            summary.modelValues.includes("grok-4.6") && !summary.modelValues.includes("deepseek-v4.1-flash"),
+            JSON.stringify(summary.modelValues),
+        );
         check("grokified list has no cometapi-only model", !summary.modelValues.includes("deepseek-v4.1-flash"));
         eq(
             "effort combo narrowed to grokified levels",
@@ -279,7 +291,7 @@ async function launch() {
         check("node type is registered", !!def);
         eq("node output names", def.output_name, ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"]);
         eq("node category", def.category, "LLM/API");
-        eq("provider widget choices come from the server", def.input.required.provider[0].length, 3);
+        eq("provider widget choices come from the server", def.input.required.provider[0].length, 4);
         check("image input is optional", !!def.input.optional.image);
         check("VALIDATE_INPUTS makes the model list advisory", def.input.required.model[1].default === "grok-4.7");
 

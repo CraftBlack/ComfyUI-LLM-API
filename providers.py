@@ -51,6 +51,9 @@ class Provider:
     supports_temperature: bool = True
     supports_detail: bool = True
     max_tokens_param: str = MAX_TOKENS_PARAM
+    #: the gateway only reports ``usage`` over SSE when ``stream_options`` asks
+    #: for it (verified on Coarena; CometAPI and Grokified always include it).
+    stream_usage: bool = False
 
     #: ``/models`` entries are kept only when this key exists on the entry
     #: (CometAPI ships 472 ids of which only 15 are chat models).
@@ -149,6 +152,46 @@ GROKIFIED = Provider(
     ),
 )
 
+COARENA = Provider(
+    id="coarena",
+    label="Coarena (coarena.ai)",
+    base_url="https://coarena.ai/api/v1",
+    key_env="COARENA_API_KEY",
+    key_hint="coa_...",
+    default_model="grok-4-7",
+    fallback_models=(
+        "grok-4-7",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-fable-5-2",
+        "claude-haiku-5-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "deepseek-v4-1-flash-1017",
+        "gemini-3-8-flash",
+        "gemini-4-argon",
+        "gemini-4-carbon",
+        "glm-5-3-flash",
+        "hy4",
+        "kimi-k3",
+        "kimi-k3-1-pro",
+        "mimo-v2-6-pro",
+        "minimax-m3-1-flash",
+        "qwen3-8-2-4t-a95b",
+    ),
+    # /models advertises low..xhigh, but the live endpoint also accepts
+    # minimal and max (verified 2026-11-14). The bare word "default" is
+    # rejected with HTTP 400, so it is stripped before the call like CometAPI.
+    reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh", "max"),
+    docs_url="https://coarena.ai/docs",
+    notes=(
+        "Free tier: $5 of model use per day, 30 requests/min, 2 concurrent. "
+        "max_completion_tokens caps the visible answer only; reasoning tokens "
+        "are added on top. GET /models needs no key."
+    ),
+    stream_usage=True,
+)
+
 CUSTOM = Provider(
     id="custom",
     label="Custom / self-hosted (OpenAI-compatible)",
@@ -168,7 +211,7 @@ CUSTOM = Provider(
     supports_detail=False,
 )
 
-PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, CUSTOM)
+PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, CUSTOM)
 
 BY_ID: dict[str, Provider] = {p.id: p for p in PROVIDERS}
 BY_LABEL: dict[str, Provider] = {p.label: p for p in PROVIDERS}

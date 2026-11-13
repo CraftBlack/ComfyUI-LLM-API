@@ -3,7 +3,7 @@
 Deliberately dependency-light: only ``requests``, which ComfyUI already ships,
 so nothing extra has to be installed.
 
-Endpoints used (both gateways implement them identically):
+Endpoints used (all gateways implement them identically):
 
     GET  {base_url}/models            -> catalogue, used to fill the combo widget
     POST {base_url}/chat/completions  -> chat completion (streaming or not)
@@ -14,6 +14,9 @@ Verified gateway quirks this module compensates for:
   completion tokens) but honours ``max_completion_tokens`` exactly.
 * CometAPI answers an unknown model with HTTP **503** ``model_not_found`` -
   retrying that is pointless, so it is classified before the retry table.
+* Coarena answers an unknown model with HTTP **404** and the same
+  ``model_not_found`` code; it also only reports ``usage`` on a stream when
+  ``stream_options.include_usage`` is sent (see ``Provider.stream_usage``).
 * CometAPI rejects the literal effort ``"default"``/``"none"`` with HTTP 400,
   so unsupported values are stripped and the call is retried once.
 * Grokified answers an unfunded account with HTTP 402 and a human-readable
@@ -312,6 +315,9 @@ def build_body(
     effort = _clean_effort(reasoning_effort)
     if effort and effort not in _STOP_WORDS:
         body["reasoning_effort"] = effort
+
+    if stream and provider.stream_usage:
+        body["stream_options"] = {"include_usage": True}
 
     if extra_body:
         body.update(extra_body)

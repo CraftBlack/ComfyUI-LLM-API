@@ -60,9 +60,17 @@ eq("labels are unique", len(labels), len(set(labels)))
 eq("provider ids are unique", len(labels), len({p.id for p in providers.PROVIDERS}))
 check("cometapi is registered", "cometapi" in providers.BY_ID)
 check("grokified is registered", "grokified" in providers.BY_ID)
+check("coarena is registered", "coarena" in providers.BY_ID)
 eq("cometapi base url", providers.COMETAPI.base_url, "https://api.cometapi.com/v1")
 eq("cometapi key env", providers.COMETAPI.key_env, "COMETAPI_API_KEY")
 eq("grokified key env", providers.GROKIFIED.key_env, "GROKIFIED_API_KEY")
+eq("coarena base url", providers.COARENA.base_url, "https://coarena.ai/api/v1")
+eq("coarena key env", providers.COARENA.key_env, "COARENA_API_KEY")
+eq("coarena default model", providers.COARENA.default_model, "grok-4-7")
+check("grok-4-7 in coarena fallback list", "grok-4-7" in providers.COARENA.fallback_models)
+check("coarena accepts minimal/max effort", {"minimal", "max"} <= set(providers.COARENA.reasoning_efforts))
+check("coarena asks for usage on stream", providers.COARENA.stream_usage)
+check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
 eq("cometapi default model", providers.COMETAPI.default_model, "grok-4.7")
 check("grok-4.7 in cometapi fallback list", "grok-4.7" in providers.COMETAPI.fallback_models)
 check(
@@ -155,6 +163,13 @@ b = client.build_body(
     provider=providers.CUSTOM, model="m", messages=[], extra_body={"stop": ["\n\n"]}, stream=False
 )
 eq("extra_body merged", b.get("stop"), ["\n\n"])
+
+b = client.build_body(provider=providers.COARENA, model="grok-4-7", messages=[], stream=True)
+eq("coarena asks the stream for usage", b.get("stream_options"), {"include_usage": True})
+b = client.build_body(provider=providers.COARENA, model="grok-4-7", messages=[], stream=False)
+check("stream_options only rides on a stream", "stream_options" not in b)
+b = client.build_body(provider=providers.COMETAPI, model="m", messages=[], stream=True)
+check("cometapi never sends stream_options", "stream_options" not in b)
 
 # --------------------------------------------------------------------------- #
 print("== client: parameter downgrade ==")
@@ -507,7 +522,7 @@ check("pyproject repository url", "github.com/CraftBlack/ComfyUI-LLM-API" in tex
 # no secret may be committed anywhere in the pack
 import re  # noqa: E402
 
-secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}")
+secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}")
 for path in ROOT.rglob("*"):
     if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
         continue

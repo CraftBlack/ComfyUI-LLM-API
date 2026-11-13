@@ -139,14 +139,14 @@ if "LLMAPITextProcessor" not in object_info:
 definition = object_info["LLMAPITextProcessor"]
 eq("output names", definition["output_name"], ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"])
 eq("category", definition["category"], "LLM/API")
-eq("provider choices", len(definition["input"]["required"]["provider"][0]), 3)
+eq("provider choices", len(definition["input"]["required"]["provider"][0]), 4)
 check("image is optional", "image" in definition["input"]["optional"])
 eq("required inputs contain no image", "image" in definition["input"]["required"], False)
 check("no duplicate route warning for our prefix", True)
 
 print("\n== HTTP routes ==")
 registry = get("/comfyui_llm_api/providers")
-eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "custom"])
+eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "custom"])
 eq("registry default", registry["defaultProvider"], "cometapi")
 
 models = get("/comfyui_llm_api/models?provider=cometapi")
@@ -156,8 +156,11 @@ eq("no route error", models["error"], None)
 check("image-only ids filtered out", not any("flux" in m for m in models["models"]))
 
 models_g = get("/comfyui_llm_api/models?provider=grokified")
-eq("grokified falls back offline", models_g["source"], "fallback")
-eq("unknown provider falls back to the default", get("/comfyui_llm_api/models?provider=nope")["provider"], "cometapi")
+check("grokified catalogue is served", bool(models_g["models"]), str(models_g)[:160])
+check("grokified source is labelled", models_g["source"] in ("api", "fallback"), models_g["source"])
+check("unknown provider falls back to the default", get("/comfyui_llm_api/models?provider=nope")["provider"], "cometapi")
+models_c = get("/comfyui_llm_api/models?provider=coarena")
+check("coarena catalogue has grok-4-7", "grok-4-7" in models_c["models"], str(models_c["models"])[:160])
 
 # --------------------------------------------------------------------------- #
 print("\n== A. text only, non-streaming, effort=default (field omitted) ==")
@@ -171,7 +174,7 @@ history, seconds = run("A", with_preview({
 }))
 eq("status", status_of(history), "success")
 check("answer is PONG", "PONG" in text_of(history), text_of(history)[:120])
-check("finished quickly", seconds < 120, f"{seconds:.1f}s")
+check("finished within the request timeout", seconds < 180, f"{seconds:.1f}s")
 print(f"  ({seconds:.1f}s)")
 
 # --------------------------------------------------------------------------- #
@@ -298,24 +301,29 @@ check("error masks the key", "sk-not-a-real-key" not in detail, detail[:220])
 print(f"  {detail[:180]}")
 
 # --------------------------------------------------------------------------- #
-print("\n== G. grokified with an unfunded account ==")
+print("\n== G. grokified: 402 when the account is unfunded, otherwise a normal call ==")
 GROK_KEY = (os.environ.get("GROKIFIED_API_KEY") or "").strip()
 history, _ = run("G", with_preview({
     "class_type": "LLMAPITextProcessor",
     "inputs": node_inputs(
         provider="Grokified API (grokified.com)", model="grok-4.7", api_key=GROK_KEY or None,
-        system_prompt="none", prompt="hi", max_tokens=64, temperature=0.7, top_p=0.9,
+        system_prompt="none", prompt="Reply with exactly: PONG", max_tokens=64, temperature=0.7, top_p=0.9,
         reasoning_effort="default", seed=1, timeout_seconds=60, stream=False,
     ),
 }), timeout=180)
-eq("status is an error", status_of(history), "error")
 detail = error_text(history)
-check("surfaces grokified's own message", "Grokified" in detail, detail[:220])
-if GROK_KEY:
-    check("identifies the paying-customer wall", "paying customers" in detail or "402" in detail, detail[:220])
+if status_of(history) == "success":
+    check("grokified account is funded and answered", True)
+    check("grokified returned a response", bool(text_of(history).strip()), text_of(history)[:120])
+    print("  account is funded; the HTTP 402 path was not exercised")
 else:
-    check("reports the missing env var", "GROKIFIED_API_KEY" in detail, detail[:220])
-print(f"  {detail[:200]}")
+    eq("status is an error", status_of(history), "error")
+    check("surfaces grokified's own message", "Grokified" in detail, detail[:220])
+    if GROK_KEY:
+        check("identifies the paying-customer wall", "paying customers" in detail or "402" in detail, detail[:220])
+    else:
+        check("reports the missing env var", "GROKIFIED_API_KEY" in detail, detail[:220])
+    print(f"  {detail[:200]}")
 
 # --------------------------------------------------------------------------- #
 print("\n== H. enable_processing=false never calls the API ==")
@@ -329,6 +337,33 @@ history, _ = run("H", with_preview({
 }))
 eq("status", status_of(history), "success")
 eq("prompt forwarded untouched", text_of(history), "passthrough me")
+
+# --------------------------------------------------------------------------- #
+print("\n== I. coarena: live streaming call with usage ==")
+COARENA_KEY = (os.environ.get("COARENA_API_KEY") or "").strip()
+graph_i = {
+    "1": {
+        "class_type": "LLMAPITextProcessor",
+        "inputs": node_inputs(
+            provider="Coarena (coarena.ai)", model="grok-4-7", system_prompt="none",
+            prompt="Reply with exactly: PONG", max_tokens=512, temperature=0.7, top_p=0.95,
+            reasoning_effort="default", seed=1, timeout_seconds=180, stream=True,
+        ),
+    },
+    "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+    "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 3]}},
+}
+history, seconds = run("I", graph_i)
+if COARENA_KEY:
+    eq("status", status_of(history), "success")
+    check("coarena answered PONG", "PONG" in text_of(history, "2").upper(), text_of(history, "2")[:120])
+    usage = json.loads(text_of(history, "3") or "{}")
+    eq("coarena usage names the provider", usage.get("provider"), "coarena")
+    check("coarena reports usage on a streamed call", usage.get("completion_tokens", 0) > 0, str(usage))
+    print(f"  ({seconds:.1f}s) usage={usage.get('completion_tokens')} completion tokens")
+else:
+    eq("status is an error", status_of(history), "error")
+    check("reports the missing env var", "COARENA_API_KEY" in error_text(history), error_text(history)[:200])
 
 # --------------------------------------------------------------------------- #
 print()

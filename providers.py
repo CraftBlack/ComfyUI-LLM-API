@@ -51,8 +51,12 @@ class Provider:
     supports_temperature: bool = True
     supports_detail: bool = True
     max_tokens_param: str = MAX_TOKENS_PARAM
+    #: local servers and proxies often run without auth; when False an empty
+    #: key is sent as no Authorization header instead of raising.
+    requires_key: bool = True
     #: the gateway only reports ``usage`` over SSE when ``stream_options`` asks
-    #: for it (verified on Coarena; CometAPI and Grokified always include it).
+    #: for it (verified on Coarena and Grok Build; CometAPI and Grokified
+    #: always include it).
     stream_usage: bool = False
 
     #: ``/models`` entries are kept only when this key exists on the entry
@@ -76,6 +80,7 @@ class Provider:
             "supportsSeed": self.supports_seed,
             "supportsTemperature": self.supports_temperature,
             "supportsDetail": self.supports_detail,
+            "requiresKey": self.requires_key,
             "maxTokensParam": self.max_tokens_param,
             "docsUrl": self.docs_url,
             "notes": self.notes,
@@ -255,6 +260,27 @@ BAZA_AI = Provider(
     ),
 )
 
+GROK_BUILD = Provider(
+    id="grokbuild",
+    label="Grok Build (local proxy)",
+    base_url="http://127.0.0.1:8000/v1",
+    key_env="GROK_API_KEY",
+    key_hint="empty = no auth (proxy default)",
+    default_model="grok-4.7",
+    fallback_models=("grok-4.7",),
+    # Live calls accepted minimal..xhigh (verified 2026-11-15); "max", "none"
+    # and the literal "default" are rejected by the backend.
+    reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh"),
+    notes=(
+        "Local proxy from Get API Grok Build (api_server.py) forwarding to the "
+        "Grok CLI session. Start it with `python api_server.py`; loopback needs "
+        "no key unless GROK_API_KEY was set. The backend rejects images below "
+        "512 px total."
+    ),
+    requires_key=False,
+    stream_usage=True,
+)
+
 CUSTOM = Provider(
     id="custom",
     label="Custom / self-hosted (OpenAI-compatible)",
@@ -272,9 +298,10 @@ CUSTOM = Provider(
     ),
     supports_seed=True,
     supports_detail=False,
+    requires_key=False,
 )
 
-PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, BAZA_AI, CUSTOM)
+PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, BAZA_AI, GROK_BUILD, CUSTOM)
 
 BY_ID: dict[str, Provider] = {p.id: p for p in PROVIDERS}
 BY_LABEL: dict[str, Provider] = {p.label: p for p in PROVIDERS}

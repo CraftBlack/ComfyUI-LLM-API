@@ -77,6 +77,15 @@ eq("bazaai default model", providers.BAZA_AI.default_model, "grok-4.7")
 check("grok-4.7 in bazaai fallback list", "grok-4.7" in providers.BAZA_AI.fallback_models)
 check("bazaai accepts minimal/max effort", {"minimal", "max"} <= set(providers.BAZA_AI.reasoning_efforts))
 check("bazaai keeps the default stream usage", not providers.BAZA_AI.stream_usage)
+check("grokbuild is registered", "grokbuild" in providers.BY_ID)
+eq("grokbuild base url", providers.GROK_BUILD.base_url, "http://127.0.0.1:8000/v1")
+eq("grokbuild key env", providers.GROK_BUILD.key_env, "GROK_API_KEY")
+eq("grokbuild default model", providers.GROK_BUILD.default_model, "grok-4.7")
+check("grokbuild fallback list", providers.GROK_BUILD.fallback_models == ("grok-4.7",))
+check("grokbuild has no max effort", "max" not in providers.GROK_BUILD.reasoning_efforts)
+check("grokbuild works without a key", not providers.GROK_BUILD.requires_key)
+check("grokbuild asks for usage on stream", providers.GROK_BUILD.stream_usage)
+check("custom works without a key", not providers.CUSTOM.requires_key)
 check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
 eq("cometapi default model", providers.COMETAPI.default_model, "grok-4.7")
 check("grok-4.7 in cometapi fallback list", "grok-4.7" in providers.COMETAPI.fallback_models)
@@ -115,6 +124,10 @@ registry = providers.registry_json()
 eq("registry_json provider count", len(registry["providers"]), len(providers.PROVIDERS))
 check("registry_json exposes effort lists", all(p["efforts"] for p in registry["providers"]))
 check("registry_json is serialisable", json.dumps(registry) is not None)
+check(
+    "registry marks optional-key providers",
+    any(p["id"] == "grokbuild" and p["requiresKey"] is False for p in registry["providers"]),
+)
 
 # --------------------------------------------------------------------------- #
 print("== client: url + key helpers ==")
@@ -130,6 +143,8 @@ eq("mask_key short", client.mask_key("abc"), "abc...")
 eq("mask_key long", client.mask_key("sk-" + "x" * 48), "sk-xxxxx...xxxx".replace("xxxxx", "xxxxx"))
 check("mask_key never leaks the middle", "x" * 30 not in client.mask_key("sk-" + "x" * 40))
 eq("mask_key empty", client.mask_key(""), "(none)")
+eq("headers carry a key", client._headers("abc")["Authorization"], "Bearer abc")
+check("headers omit auth when the key is empty", "Authorization" not in client._headers(""))
 
 os.environ["__LLM_TEST_KEY__"] = "from-env"
 fake = providers.Provider(
@@ -184,6 +199,12 @@ b = client.build_body(
 )
 eq("bazaai uses max_completion_tokens", b.get("max_completion_tokens"), 99)
 check("bazaai does not send stream_options", "stream_options" not in b)
+
+b = client.build_body(
+    provider=providers.GROK_BUILD, model="grok-4.7", messages=[], max_tokens=99, stream=True
+)
+eq("grokbuild uses max_completion_tokens", b.get("max_completion_tokens"), 99)
+eq("grokbuild asks the stream for usage", b.get("stream_options"), {"include_usage": True})
 
 # --------------------------------------------------------------------------- #
 print("== client: parameter downgrade ==")
@@ -280,6 +301,14 @@ baza_400 = {
 code, message = client._error_details(FakeResponse(400, baza_400))
 eq("baza 400 code", code, "model_not_allowed")
 check("baza 400 is fatal (no retry storm)", client._is_fatal(400, code, message))
+
+grokbuild_404 = {
+    "code": "not-found",
+    "error": "The model definitely-not-a-model does not exist or your team does not have access to it.",
+}
+code, message = client._error_details(FakeResponse(404, grokbuild_404))
+eq("grokbuild 404 code", code, "not-found")
+check("grokbuild 404 is fatal", client._is_fatal(404, code, message))
 
 check("429 is retryable", 429 in client.RETRY_STATUSES)
 check("503 is retryable", 503 in client.RETRY_STATUSES)
@@ -457,6 +486,33 @@ result = node.generate(
 eq("disabled processing returns the prompt", result[0], "hello world")
 eq("disabled processing reports itself", result[2], "skipped (enable_processing = false)")
 eq("disabled processing returns empty usage", result[3], "{}")
+
+# an optional-key provider must reach the client without an API key
+original_chat_completion = nodes.chat_completion
+nodes.chat_completion = lambda **kwargs: {
+    "content": "ok",
+    "reasoning": "",
+    "usage": {},
+    "notes": [],
+    "provider": "grokbuild",
+    "provider_label": providers.GROK_BUILD.label,
+    "base_url": providers.GROK_BUILD.base_url,
+    "model": "grok-4.7",
+    "streamed": False,
+    "finish_reason": "stop",
+}
+saved_grok_key = os.environ.pop("GROK_API_KEY", None)
+try:
+    result = node.generate(
+        provider=providers.GROK_BUILD.label, model="grok-4.7", system_prompt="none", prompt="hi",
+        max_tokens=16, temperature=0.7, top_p=0.9, reasoning_effort="high", seed=1,
+        timeout_seconds=30, api_key="", stream=False,
+    )
+    eq("grokbuild runs without a key", result[0], "ok")
+finally:
+    nodes.chat_completion = original_chat_completion
+    if saved_grok_key is not None:
+        os.environ["GROK_API_KEY"] = saved_grok_key
 
 # missing key must raise before any HTTP call
 saved = {name: os.environ.pop(name, None) for name in ("COMETAPI_API_KEY", "GROKIFIED_API_KEY", "LLM_API_KEY")}

@@ -285,7 +285,7 @@ class LLMAPITextProcessor:
         chosen_model = (model_override or "").strip() or (model or "").strip()
 
         key = resolve_api_key(selected, api_key)
-        if not key:
+        if not key and selected.requires_key:
             raise LLMAPIKeyError(
                 f"No API key for {selected.label}. Paste it into the api_key field or set "
                 f"the {selected.key_env} environment variable, then retry."

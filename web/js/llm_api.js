@@ -134,13 +134,26 @@ const BUILTIN_REGISTRY = {
             efforts: ["default", "minimal", "low", "medium", "high", "xhigh", "max"],
         },
         {
+            id: "grokbuild",
+            label: "Grok Build (local proxy)",
+            baseUrl: "http://127.0.0.1:8000/v1",
+            keyEnv: "GROK_API_KEY",
+            keyHint: "empty = no auth (proxy default)",
+            defaultModel: "grok-4.7",
+            models: ["grok-4.7"],
+            efforts: ["default", "minimal", "low", "medium", "high", "xhigh"],
+            requiresKey: false,
+        },
+        {
             id: "custom",
             label: "Custom / self-hosted (OpenAI-compatible)",
             baseUrl: "http://127.0.0.1:1234/v1",
             keyEnv: "LLM_API_KEY",
+            keyHint: "often empty for local servers",
             defaultModel: "local-model",
             models: ["local-model"],
             efforts: ["default", "minimal", "low", "medium", "high", "xhigh", "max"],
+            requiresKey: false,
         },
     ],
 };
@@ -181,6 +194,7 @@ function indexRegistry(payload) {
             efforts: unique(provider.efforts),
             docsUrl: provider.docsUrl || "",
             notes: provider.notes || "",
+            requiresKey: provider.requiresKey !== false,
         };
         byId.set(entry.id, entry);
         byLabel.set(entry.label, entry);
@@ -345,8 +359,8 @@ async function applyProvider(node, providerValue, options = {}) {
     const keyWidget = findWidget(node, "api_key");
     if (keyWidget) {
         keyWidget.options = keyWidget.options || {};
-        keyWidget.options.placeholder = entry.keyEnv
-            ? `empty = $${entry.keyEnv}`
+        keyWidget.options.placeholder = entry.requiresKey
+            ? (entry.keyEnv ? `empty = $${entry.keyEnv}` : entry.keyHint || "optional")
             : entry.keyHint || "optional";
     }
 
@@ -356,9 +370,12 @@ async function applyProvider(node, providerValue, options = {}) {
         modelWidget.options.placeholder = entry.defaultModel;
     }
 
+    const keyText = entry.requiresKey
+        ? entry.keyEnv || "(none)"
+        : `${entry.keyEnv || "none"} (optional)`;
     const lines = [
         `${entry.label}`,
-        `${models.length} model${models.length === 1 ? "" : "s"} · key: ${entry.keyEnv || "(none)"}`,
+        `${models.length} model${models.length === 1 ? "" : "s"} · key: ${keyText}`,
     ];
     if (record.error) lines.push(`⚠ ${String(record.error).slice(0, 200)}`);
     setStatus(node, lines.join("\n"));

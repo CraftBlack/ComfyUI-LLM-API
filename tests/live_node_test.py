@@ -68,6 +68,14 @@ def head_ok(path: str) -> bool:
         return False
 
 
+def url_ok(url: str, timeout: float = 3.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.status == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def node_inputs(**kwargs) -> dict:
     """Base inputs for LLMAPITextProcessor, with blanks removed."""
     return {k: v for k, v in kwargs.items() if v is not None}
@@ -139,14 +147,14 @@ if "LLMAPITextProcessor" not in object_info:
 definition = object_info["LLMAPITextProcessor"]
 eq("output names", definition["output_name"], ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"])
 eq("category", definition["category"], "LLM/API")
-eq("provider choices", len(definition["input"]["required"]["provider"][0]), 5)
+eq("provider choices", len(definition["input"]["required"]["provider"][0]), 6)
 check("image is optional", "image" in definition["input"]["optional"])
 eq("required inputs contain no image", "image" in definition["input"]["required"], False)
 check("no duplicate route warning for our prefix", True)
 
 print("\n== HTTP routes ==")
 registry = get("/comfyui_llm_api/providers")
-eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "bazaai", "custom"])
+eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "custom"])
 eq("registry default", registry["defaultProvider"], "cometapi")
 
 models = get("/comfyui_llm_api/models?provider=cometapi")
@@ -163,6 +171,8 @@ models_c = get("/comfyui_llm_api/models?provider=coarena")
 check("coarena catalogue has grok-4-7", "grok-4-7" in models_c["models"], str(models_c["models"])[:160])
 models_b = get("/comfyui_llm_api/models?provider=bazaai")
 check("bazaai catalogue has grok-4.7", "grok-4.7" in models_b["models"], str(models_b["models"])[:160])
+models_gb = get("/comfyui_llm_api/models?provider=grokbuild")
+check("grokbuild catalogue has grok-4.7", "grok-4.7" in models_gb["models"], str(models_gb["models"])[:160])
 
 # --------------------------------------------------------------------------- #
 print("\n== A. text only, non-streaming, effort=default (field omitted) ==")
@@ -403,6 +413,37 @@ if BAZA_KEY:
 else:
     eq("status is an error", status_of(history), "error")
     check("reports the missing env var", "BAZAAI_API_KEY" in error_text(history), error_text(history)[:200])
+
+# --------------------------------------------------------------------------- #
+print("\n== K. grokbuild: local proxy ==")
+GROK_BUILD_URL = (os.environ.get("GROK_BUILD_URL") or "http://127.0.0.1:8000").rstrip("/")
+GROK_KEY = (os.environ.get("GROK_API_KEY") or "").strip()
+if url_ok(f"{GROK_BUILD_URL}/health"):
+    graph_k = {
+        "1": {
+            "class_type": "LLMAPITextProcessor",
+            "inputs": node_inputs(
+                provider="Grok Build (local proxy)", model="grok-4.7", system_prompt="none",
+                prompt="Reply with exactly: PONG", max_tokens=512, temperature=0.7, top_p=0.95,
+                reasoning_effort="high", seed=1, timeout_seconds=180, stream=True,
+                base_url=f"{GROK_BUILD_URL}/v1", api_key=GROK_KEY or None,
+            ),
+        },
+        "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+        "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 3]}},
+    }
+    history, seconds = run("K", graph_k)
+    eq("status", status_of(history), "success")
+    check("grokbuild answered PONG", "PONG" in text_of(history, "2").upper(), text_of(history, "2")[:120])
+    usage = json.loads(text_of(history, "3") or "{}")
+    eq("grokbuild usage names the provider", usage.get("provider"), "grokbuild")
+    check("grokbuild reports usage on a streamed call", usage.get("completion_tokens", 0) > 0, str(usage))
+    check("grokbuild reports reasoning tokens", usage.get("reasoning_tokens", 0) > 0, str(usage))
+    print(f"  ({seconds:.1f}s) usage={usage.get('completion_tokens')} completion, "
+          f"reasoning={usage.get('reasoning_tokens')} tokens")
+else:
+    check("grok build proxy is not running (live checks skipped)", True)
+    print("  start it with: python api_server.py")
 
 # --------------------------------------------------------------------------- #
 print()

@@ -19,6 +19,8 @@ Verified gateway quirks this module compensates for:
   ``stream_options.include_usage`` is sent (see ``Provider.stream_usage``).
 * Baza AI answers an unknown model with HTTP **400** ``model_not_allowed`` -
   also fatal - and only exposes reasoning text over the stream.
+* Grok Build is a loopback proxy that runs without auth by default, so
+  providers can declare ``requires_key=False``.
 * CometAPI rejects the literal effort ``"default"``/``"none"`` with HTTP 400,
   so unsupported values are stripped and the call is retried once.
 * Grokified answers an unfunded account with HTTP 402 and a human-readable
@@ -50,6 +52,7 @@ FATAL_CODES = frozenset(
     {
         "model_not_found",
         "model_not_allowed",
+        "not-found",
         "invalid_request_error",
         "invalid_api_key",
         "insufficient_quota",
@@ -106,11 +109,13 @@ def mask_key(key: str) -> str:
 
 
 def _headers(api_key: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {api_key}",
+    headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 def _as_text(value: Any) -> str:
@@ -159,11 +164,11 @@ def _error_details(response: requests.Response) -> tuple[str, str]:
 
     error = payload.get("error")
     if isinstance(error, str):
-        return "", error[:800]
+        return str(payload.get("code") or ""), error[:800]
     if not isinstance(error, dict):
-        return "", str(payload.get("message") or payload)[:800]
+        return str(payload.get("code") or ""), str(payload.get("message") or payload)[:800]
 
-    code = str(error.get("code") or "")
+    code = str(error.get("code") or payload.get("code") or "")
     message = error.get("message")
 
     # {"error":{"message":"{\"code\":\"invalid-argument\",...}（traceid...)","type":"comet_api_error"}}
@@ -250,7 +255,7 @@ def list_models(
     models: list[str] = []
     error: str | None = None
 
-    if not key:
+    if not key and provider.requires_key:
         error = f"no API key (widget empty and {provider.key_env} unset)"
     else:
         try:
@@ -498,7 +503,7 @@ def chat_completion(
     provider = get_provider(provider) if not isinstance(provider, Provider) else provider
     base = normalize_base_url(base_url, provider)
     key = resolve_api_key(provider, api_key)
-    if not key:
+    if not key and provider.requires_key:
         raise LLMAPIKeyError(
             f"No API key for {provider.label}. Paste it into the node's api_key field "
             f"or set the {provider.key_env} environment variable."

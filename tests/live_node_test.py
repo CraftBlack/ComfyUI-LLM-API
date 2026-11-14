@@ -68,9 +68,10 @@ def head_ok(path: str) -> bool:
         return False
 
 
-def url_ok(url: str, timeout: float = 3.0) -> bool:
+def url_ok(url: str, timeout: float = 3.0, headers: dict | None = None) -> bool:
+    request = urllib.request.Request(url, headers=headers or {})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status == 200
     except Exception:  # noqa: BLE001
         return False
@@ -415,10 +416,11 @@ else:
     check("reports the missing env var", "BAZAAI_API_KEY" in error_text(history), error_text(history)[:200])
 
 # --------------------------------------------------------------------------- #
-print("\n== K. grokbuild: local proxy ==")
-GROK_BUILD_URL = (os.environ.get("GROK_BUILD_URL") or "http://127.0.0.1:8000").rstrip("/")
+print("\n== K. grokbuild: Tailscale proxy ==")
+GROK_BUILD_URL = (os.environ.get("GROK_BUILD_URL") or "https://kraplegit.tail341768.ts.net:8443").rstrip("/")
 GROK_KEY = (os.environ.get("GROK_API_KEY") or "").strip()
-if url_ok(f"{GROK_BUILD_URL}/health"):
+health_headers = {"Authorization": f"Bearer {GROK_KEY}"} if GROK_KEY else {}
+if url_ok(f"{GROK_BUILD_URL}/health", headers=health_headers):
     graph_k = {
         "1": {
             "class_type": "LLMAPITextProcessor",
@@ -442,8 +444,8 @@ if url_ok(f"{GROK_BUILD_URL}/health"):
     print(f"  ({seconds:.1f}s) usage={usage.get('completion_tokens')} completion, "
           f"reasoning={usage.get('reasoning_tokens')} tokens")
 else:
-    check("grok build proxy is not running (live checks skipped)", True)
-    print("  start it with: python api_server.py")
+    check("grok build proxy is not reachable or the key is missing (live checks skipped)", True)
+    print("  start it with: python api_server_tailscale.py (and set GROK_API_KEY)")
 
 # --------------------------------------------------------------------------- #
 print()

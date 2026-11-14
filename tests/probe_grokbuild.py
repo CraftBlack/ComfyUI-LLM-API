@@ -1,10 +1,10 @@
-"""Live probe of the local Grok Build proxy (Get API Grok Build/api_server.py).
+"""Live probe of the Grok Build proxy exposed through Tailscale.
 
-Run:  python tests\\probe_grokbuild.py
-      GROK_BUILD_URL=http://127.0.0.1:8000 python tests\\probe_grokbuild.py
+Run:  set GROK_API_KEY=<key from kunci_api_grok.txt>  &&  python tests\\probe_grokbuild.py
+      GROK_BUILD_URL=https://host.tailXXXX.ts.net:8443 python tests\\probe_grokbuild.py
 
-The proxy needs no API key on loopback by default; set GROK_API_KEY only if it
-was started with one. Prints capability facts, never the key.
+The Tailscale variant (api_server_tailscale.py) always requires the API key,
+even for /health. Prints capability facts, never the key.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import time
 
 import requests
 
-ROOT = (os.environ.get("GROK_BUILD_URL") or "http://127.0.0.1:8000").rstrip("/")
+ROOT = (os.environ.get("GROK_BUILD_URL") or "https://kraplegit.tail341768.ts.net:8443").rstrip("/")
 BASE = f"{ROOT}/v1"
 KEY = (os.environ.get("GROK_API_KEY") or "").strip()
 MODEL = os.environ.get("GROK_BUILD_MODEL", "grok-4.7")
@@ -42,14 +42,17 @@ def post(body: dict, timeout: int = 180) -> requests.Response:
 
 
 try:
-    health = requests.get(f"{ROOT}/health", timeout=5)
+    health = requests.get(f"{ROOT}/health", headers=H, timeout=5)
 except requests.RequestException as exc:
     sys.exit(f"Grok Build proxy is not reachable at {ROOT}: {exc}")
 
 show("GET /health")
 print("status", health.status_code, brief(health.text, 200))
 if health.status_code != 200:
-    sys.exit("Grok Build proxy is not healthy; start it with `python api_server.py`.")
+    sys.exit(
+        "Grok Build proxy is not healthy. Start it with `python api_server_tailscale.py` "
+        "and set GROK_API_KEY to the key in kunci_api_grok.txt."
+    )
 
 # --------------------------------------------------------------------------- #
 show("GET /models")
@@ -86,6 +89,7 @@ else:
 # --------------------------------------------------------------------------- #
 show("token param semantics")
 for key in ("max_tokens", "max_completion_tokens"):
+    time.sleep(0.7)  # the backend allows 2 requests/second
     r = post(
         {
             "model": MODEL,
@@ -109,6 +113,7 @@ for key in ("max_tokens", "max_completion_tokens"):
 # --------------------------------------------------------------------------- #
 show("reasoning_effort acceptance")
 for effort in ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max"):
+    time.sleep(0.7)  # the backend allows 2 requests/second
     started = time.perf_counter()
     r = post(
         {
@@ -190,6 +195,7 @@ for label, extra in (
     ("temperature+top_p", {"temperature": 0.7, "top_p": 0.95}),
     ("stop", {"stop": ["\n\n"]}),
 ):
+    time.sleep(0.7)  # the backend allows 2 requests/second
     r = post(
         {
             "model": MODEL,

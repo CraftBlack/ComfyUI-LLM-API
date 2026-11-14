@@ -78,12 +78,13 @@ check("grok-4.7 in bazaai fallback list", "grok-4.7" in providers.BAZA_AI.fallba
 check("bazaai accepts minimal/max effort", {"minimal", "max"} <= set(providers.BAZA_AI.reasoning_efforts))
 check("bazaai keeps the default stream usage", not providers.BAZA_AI.stream_usage)
 check("grokbuild is registered", "grokbuild" in providers.BY_ID)
-eq("grokbuild base url", providers.GROK_BUILD.base_url, "http://127.0.0.1:8000/v1")
+eq("grokbuild base url", providers.GROK_BUILD.base_url, "https://kraplegit.tail341768.ts.net:8443/v1")
 eq("grokbuild key env", providers.GROK_BUILD.key_env, "GROK_API_KEY")
 eq("grokbuild default model", providers.GROK_BUILD.default_model, "grok-4.7")
 check("grokbuild fallback list", providers.GROK_BUILD.fallback_models == ("grok-4.7",))
 check("grokbuild has no max effort", "max" not in providers.GROK_BUILD.reasoning_efforts)
-check("grokbuild works without a key", not providers.GROK_BUILD.requires_key)
+check("grokbuild requires a key", providers.GROK_BUILD.requires_key)
+check("grokbuild key hint names the file", "kunci_api_grok.txt" in providers.GROK_BUILD.key_hint)
 check("grokbuild asks for usage on stream", providers.GROK_BUILD.stream_usage)
 check("custom works without a key", not providers.CUSTOM.requires_key)
 check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
@@ -125,8 +126,12 @@ eq("registry_json provider count", len(registry["providers"]), len(providers.PRO
 check("registry_json exposes effort lists", all(p["efforts"] for p in registry["providers"]))
 check("registry_json is serialisable", json.dumps(registry) is not None)
 check(
-    "registry marks optional-key providers",
-    any(p["id"] == "grokbuild" and p["requiresKey"] is False for p in registry["providers"]),
+    "registry marks grokbuild as keyed",
+    any(p["id"] == "grokbuild" and p["requiresKey"] is True for p in registry["providers"]),
+)
+check(
+    "registry marks custom as optional-key",
+    any(p["id"] == "custom" and p["requiresKey"] is False for p in registry["providers"]),
 )
 
 # --------------------------------------------------------------------------- #
@@ -494,25 +499,25 @@ nodes.chat_completion = lambda **kwargs: {
     "reasoning": "",
     "usage": {},
     "notes": [],
-    "provider": "grokbuild",
-    "provider_label": providers.GROK_BUILD.label,
-    "base_url": providers.GROK_BUILD.base_url,
-    "model": "grok-4.7",
+    "provider": "custom",
+    "provider_label": providers.CUSTOM.label,
+    "base_url": providers.CUSTOM.base_url,
+    "model": "local-model",
     "streamed": False,
     "finish_reason": "stop",
 }
-saved_grok_key = os.environ.pop("GROK_API_KEY", None)
+saved_llm_key = os.environ.pop("LLM_API_KEY", None)
 try:
     result = node.generate(
-        provider=providers.GROK_BUILD.label, model="grok-4.7", system_prompt="none", prompt="hi",
+        provider=providers.CUSTOM.label, model="local-model", system_prompt="none", prompt="hi",
         max_tokens=16, temperature=0.7, top_p=0.9, reasoning_effort="high", seed=1,
         timeout_seconds=30, api_key="", stream=False,
     )
-    eq("grokbuild runs without a key", result[0], "ok")
+    eq("custom runs without a key", result[0], "ok")
 finally:
     nodes.chat_completion = original_chat_completion
-    if saved_grok_key is not None:
-        os.environ["GROK_API_KEY"] = saved_grok_key
+    if saved_llm_key is not None:
+        os.environ["LLM_API_KEY"] = saved_llm_key
 
 # missing key must raise before any HTTP call
 saved = {name: os.environ.pop(name, None) for name in ("COMETAPI_API_KEY", "GROKIFIED_API_KEY", "LLM_API_KEY")}

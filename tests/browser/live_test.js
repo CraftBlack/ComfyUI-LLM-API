@@ -140,12 +140,12 @@ async function launch() {
             providers.body.providers.some((p) => p.id === "bazaai" && p.baseUrl === "https://api.baza-ai.org/v1"),
         );
         check(
-            "grokbuild is offered without a key",
+            "grokbuild is offered via tailscale with a key",
             providers.body.providers.some(
                 (p) =>
                     p.id === "grokbuild" &&
-                    p.baseUrl === "http://127.0.0.1:8000/v1" &&
-                    p.requiresKey === false,
+                    p.baseUrl === "https://kraplegit.tail341768.ts.net:8443/v1" &&
+                    p.requiresKey === true,
             ),
         );
 

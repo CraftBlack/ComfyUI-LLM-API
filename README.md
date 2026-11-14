@@ -58,11 +58,12 @@ A key is resolved in this order:
 | Grokified | `GROKIFIED_API_KEY` | <https://grokified.com> |
 | Coarena | `COARENA_API_KEY` | <https://coarena.ai/account/api/keys> |
 | Baza AI | `BAZAAI_API_KEY` | your Baza AI account |
-| Grok Build | `GROK_API_KEY` | optional; only if the local proxy was started with one |
+| Grok Build | `GROK_API_KEY` | required; the key is in `kunci_api_grok.txt` on the proxy machine |
 | Custom | `LLM_API_KEY` | optional; local servers usually need none |
 
-Grok Build and Custom may run without a key: leave `api_key` empty and the node
-sends no `Authorization` header at all.
+Grok Build always requires the key (the Tailscale proxy protects every endpoint,
+including `/health`). Custom may run without one: leave `api_key` empty and the
+node sends no `Authorization` header at all.
 
 Windows (persists for the user account):
 
@@ -70,6 +71,8 @@ Windows (persists for the user account):
 [Environment]::SetEnvironmentVariable("COMETAPI_API_KEY", "sk-...", "User")
 [Environment]::SetEnvironmentVariable("COARENA_API_KEY", "coa_...", "User")
 [Environment]::SetEnvironmentVariable("BAZAAI_API_KEY", "ks_live_...", "User")
+# Grok Build (Tailscale): copy the key from kunci_api_grok.txt
+[Environment]::SetEnvironmentVariable("GROK_API_KEY", "<key-dari-kunci_api_grok.txt>", "User")
 ```
 
 Linux / macOS / WSL:
@@ -107,7 +110,7 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 | | CometAPI | Grokified | Coarena | Baza AI | Grok Build | Custom |
 |---|---|---|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `http://127.0.0.1:8000/v1` | anything |
+| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://kraplegit.tail341768.ts.net:8443/v1` | anything |
 | Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `local-model` |
 | Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 1 id (`grok-4.7`) | whatever it serves |
 | Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | all |
@@ -117,8 +120,9 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 Coarena's `/models` entry advertises the efforts `low` … `xhigh`, but live calls
 also accept `minimal` and `max`; the node offers all of them. Baza AI reports the
 served model id as `gcli/grok-4.7` and only exposes reasoning text in stream
-deltas. Grok Build is a local proxy: ComfyUI must run on the same machine (or
-override `base_url`), and the proxy must be started with `python api_server.py`.
+deltas. Grok Build is exposed through Tailscale Funnel (`api_server_tailscale.py`,
+local port 8010) and always requires the key from `kunci_api_grok.txt`; paste
+that key into the node's `api_key` field or set `GROK_API_KEY`.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -288,10 +292,12 @@ returns none at all.
 </details>
 
 <details>
-<summary><b>Grok Build</b> — local proxy, <code>grok-4.7</code>, 2026-11-15</summary>
+<summary><b>Grok Build</b> — Tailscale proxy, <code>grok-4.7</code>, 2026-11-15</summary>
 
 | Fact | Evidence |
 |---|---|
+| base URL | `https://kraplegit.tail341768.ts.net:8443/v1` (Tailscale Funnel → local port 8010) |
+| every endpoint requires the key | `/health` and `/v1/models` answer 401 without it; the key is in `kunci_api_grok.txt` |
 | only one model is exposed | `GET /v1/models` returns `grok-4.7` (context 256k, default effort `high`) |
 | the metadata lists xhigh/high/medium/low | the model entry carries `reasoning_efforts` with those ids |
 | live calls also accept `minimal` | HTTP 200 for `minimal`; `max`, `none` and `default` return HTTP 400 `invalid-argument` |
@@ -301,7 +307,7 @@ returns none at all.
 | seed/temperature/top_p pass through | HTTP 200; `stop` is rejected with HTTP 400 (`does not support parameter stop`) |
 | vision works with data URIs | a 64×64 red PNG returned `Red` (4096 px total; the backend rejects <512 px) |
 | unknown model = **HTTP 404** `not-found` | classified as fatal, not retried |
-| no key on loopback by default | `api_server.py` starts with auth disabled unless `GROK_API_KEY` is set |
+| the proxy always uses a key | `api_server_tailscale.py` requires one, even on loopback |
 
 </details>
 
@@ -315,8 +321,8 @@ returns none at all.
 | `HTTP 402` | The account has no credit. Top up, or switch the `provider` dropdown. |
 | `HTTP 401 invalid token` | Wrong or revoked key for that provider. |
 | `model_not_found` (HTTP 503 CometAPI / 404 Coarena / 400 Baza AI `model_not_allowed`) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
-| `Could not reach http://127.0.0.1:8000/v1` | The Grok Build proxy is not running. Start `python api_server.py` in `Get API Grok Build`, then retry. |
-| Grok Build answers 401 | The proxy was started with `GROK_API_KEY`; set the same key in the node's `api_key` or `GROK_API_KEY` env. |
+| `Could not reach https://kraplegit.tail341768.ts.net:8443/v1` | The Tailscale proxy is not running. Start `python api_server_tailscale.py` in `Get API Grok Build` (local port 8010), check `--status`, then retry. |
+| Grok Build answers 401 | Use the key from `kunci_api_grok.txt` in the node's `api_key` or `GROK_API_KEY` env; `/health` also requires it. |
 | Grok Build rejects an image | The backend requires at least 512 pixels total; use a larger image. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
 | Dropdown is empty / status shows `⚠` | `/comfyui_llm_api/models` could not reach the gateway; the static fallback list is shown and the reason is printed in the node. |
@@ -356,14 +362,14 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 283 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 285 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
 COMETAPI_API_KEY=sk-... python tests/probe_reasoning_stream.py   # trace / transport matrix
 COARENA_API_KEY=coa_... python tests/probe_coarena.py      # Coarena capability probe
 BAZAAI_API_KEY=ks_live_... python tests/probe_bazaai.py    # Baza AI capability probe
-python tests/probe_grokbuild.py                            # Grok Build local proxy probe
+GROK_API_KEY=... python tests/probe_grokbuild.py           # Grok Build Tailscale probe
 
 # 64 checks - queues real prompts through a running ComfyUI
 # (Coarena is skipped while its gateway reports model_unavailable; Grok Build
@@ -382,9 +388,10 @@ node contract. It also fails if an API key is ever committed.
 `POST /prompt` and reads `GET /history/<id>` back. It covers text, streaming,
 vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
 Grokified 402 path when the account is unfunded, Coarena and Baza AI streamed
-calls, the Grok Build local proxy, and `enable_processing = false`. If Coarena's
-gateway reports `model_unavailable`, its three live checks are skipped rather
-than failed; the Grok Build checks are skipped when the proxy is not running.
+calls, the Grok Build Tailscale proxy, and `enable_processing = false`. If
+Coarena's gateway reports `model_unavailable`, its three live checks are skipped
+rather than failed; the Grok Build checks are skipped when the proxy is not
+reachable or `GROK_API_KEY` is missing.
 
 **`tests/browser/live_test.js`** is the only thing that can prove the frontend
 half works: it loads ComfyUI in Chromium, injects a workflow whose saved

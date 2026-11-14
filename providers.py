@@ -263,21 +263,20 @@ BAZA_AI = Provider(
 GROK_BUILD = Provider(
     id="grokbuild",
     label="Grok Build (local proxy)",
-    base_url="http://127.0.0.1:8000/v1",
+    base_url="https://kraplegit.tail341768.ts.net:8443/v1",
     key_env="GROK_API_KEY",
-    key_hint="empty = no auth (proxy default)",
+    key_hint="key from kunci_api_grok.txt",
     default_model="grok-4.7",
     fallback_models=("grok-4.7",),
     # Live calls accepted minimal..xhigh (verified 2026-11-15); "max", "none"
     # and the literal "default" are rejected by the backend.
     reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh"),
     notes=(
-        "Local proxy from Get API Grok Build (api_server.py) forwarding to the "
-        "Grok CLI session. Start it with `python api_server.py`; loopback needs "
-        "no key unless GROK_API_KEY was set. The backend rejects images below "
-        "512 px total."
+        "Tailscale Funnel in front of Get API Grok Build/api_server_tailscale.py "
+        "(local port 8010). The key is stored in kunci_api_grok.txt on the proxy "
+        "machine and is required, even for /health. The backend rejects images "
+        "below 512 px total."
     ),
-    requires_key=False,
     stream_usage=True,
 )
 

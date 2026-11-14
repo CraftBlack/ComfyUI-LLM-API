@@ -1,7 +1,7 @@
 """Live probe of the Grok Build proxy exposed through Tailscale.
 
 Run:  set GROK_API_KEY=<key from kunci_api_grok.txt>  &&  python tests\\probe_grokbuild.py
-      GROK_BUILD_URL=https://host.tailXXXX.ts.net:8443 python tests\\probe_grokbuild.py
+      set GROK_BUILD_URL=https://<your-tailnet-host>:8443  (the hostname is redacted in the repo)
 
 The Tailscale variant (api_server_tailscale.py) always requires the API key,
 even for /health. Prints capability facts, never the key.
@@ -18,7 +18,9 @@ import time
 
 import requests
 
-ROOT = (os.environ.get("GROK_BUILD_URL") or "https://kraplegit.tail341768.ts.net:8443").rstrip("/")
+ROOT = (os.environ.get("GROK_BUILD_URL") or "https://redacted.tail341768.ts.net:8443").rstrip("/")
+if ROOT.endswith("/v1"):
+    ROOT = ROOT[:-3]
 BASE = f"{ROOT}/v1"
 KEY = (os.environ.get("GROK_API_KEY") or "").strip()
 MODEL = os.environ.get("GROK_BUILD_MODEL", "grok-4.7")

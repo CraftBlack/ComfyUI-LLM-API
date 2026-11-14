@@ -136,9 +136,9 @@ const BUILTIN_REGISTRY = {
         {
             id: "grokbuild",
             label: "Grok Build (local proxy)",
-            baseUrl: "https://kraplegit.tail341768.ts.net:8443/v1",
+            baseUrl: "https://redacted.tail341768.ts.net:8443/v1",
             keyEnv: "GROK_API_KEY",
-            keyHint: "key from kunci_api_grok.txt",
+            keyHint: "set GROK_BUILD_URL or base_url",
             defaultModel: "grok-4.7",
             models: ["grok-4.7"],
             efforts: ["default", "minimal", "low", "medium", "high", "xhigh"],

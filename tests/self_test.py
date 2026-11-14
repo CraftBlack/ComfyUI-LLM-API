@@ -78,7 +78,20 @@ check("grok-4.7 in bazaai fallback list", "grok-4.7" in providers.BAZA_AI.fallba
 check("bazaai accepts minimal/max effort", {"minimal", "max"} <= set(providers.BAZA_AI.reasoning_efforts))
 check("bazaai keeps the default stream usage", not providers.BAZA_AI.stream_usage)
 check("grokbuild is registered", "grokbuild" in providers.BY_ID)
-eq("grokbuild base url", providers.GROK_BUILD.base_url, "https://kraplegit.tail341768.ts.net:8443/v1")
+expected_grok_base = (os.environ.get("GROK_BUILD_URL") or "https://redacted.tail341768.ts.net:8443").rstrip("/")
+if not expected_grok_base.endswith("/v1"):
+    expected_grok_base += "/v1"
+eq("grokbuild base url", providers.GROK_BUILD.base_url, expected_grok_base)
+saved_grok_url = os.environ.pop("GROK_BUILD_URL", None)
+try:
+    eq(
+        "grokbuild default is redacted",
+        providers._grok_build_base(),
+        "https://redacted.tail341768.ts.net:8443/v1",
+    )
+finally:
+    if saved_grok_url is not None:
+        os.environ["GROK_BUILD_URL"] = saved_grok_url
 eq("grokbuild key env", providers.GROK_BUILD.key_env, "GROK_API_KEY")
 eq("grokbuild default model", providers.GROK_BUILD.default_model, "grok-4.7")
 check("grokbuild fallback list", providers.GROK_BUILD.fallback_models == ("grok-4.7",))

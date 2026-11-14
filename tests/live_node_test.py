@@ -417,7 +417,9 @@ else:
 
 # --------------------------------------------------------------------------- #
 print("\n== K. grokbuild: Tailscale proxy ==")
-GROK_BUILD_URL = (os.environ.get("GROK_BUILD_URL") or "https://kraplegit.tail341768.ts.net:8443").rstrip("/")
+GROK_BUILD_URL = (os.environ.get("GROK_BUILD_URL") or "https://redacted.tail341768.ts.net:8443").rstrip("/")
+if GROK_BUILD_URL.endswith("/v1"):
+    GROK_BUILD_URL = GROK_BUILD_URL[:-3]
 GROK_KEY = (os.environ.get("GROK_API_KEY") or "").strip()
 health_headers = {"Authorization": f"Bearer {GROK_KEY}"} if GROK_KEY else {}
 if url_ok(f"{GROK_BUILD_URL}/health", headers=health_headers):

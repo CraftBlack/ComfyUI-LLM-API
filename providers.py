@@ -10,6 +10,7 @@ Everything in this module was verified against the live endpoints - see
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------------- #
@@ -260,10 +261,16 @@ BAZA_AI = Provider(
     ),
 )
 
+def _grok_build_base() -> str:
+    """The real Funnel URL comes from GROK_BUILD_URL; the default is redacted."""
+    base = (os.environ.get("GROK_BUILD_URL") or "https://redacted.tail341768.ts.net:8443").rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
 GROK_BUILD = Provider(
     id="grokbuild",
     label="Grok Build (local proxy)",
-    base_url="https://kraplegit.tail341768.ts.net:8443/v1",
+    base_url=_grok_build_base(),
     key_env="GROK_API_KEY",
     key_hint="key from kunci_api_grok.txt",
     default_model="grok-4.7",
@@ -273,9 +280,10 @@ GROK_BUILD = Provider(
     reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh"),
     notes=(
         "Tailscale Funnel in front of Get API Grok Build/api_server_tailscale.py "
-        "(local port 8010). The key is stored in kunci_api_grok.txt on the proxy "
-        "machine and is required, even for /health. The backend rejects images "
-        "below 512 px total."
+        "(local port 8010). The committed hostname is redacted: set GROK_BUILD_URL "
+        "(or the node's base_url) to your real Funnel URL. The key is stored in "
+        "kunci_api_grok.txt on the proxy machine and is required, even for /health. "
+        "The backend rejects images below 512 px total."
     ),
     stream_usage=True,
 )

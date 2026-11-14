@@ -144,7 +144,7 @@ async function launch() {
             providers.body.providers.some(
                 (p) =>
                     p.id === "grokbuild" &&
-                    p.baseUrl === "https://kraplegit.tail341768.ts.net:8443/v1" &&
+                    p.baseUrl.endsWith(":8443/v1") &&
                     p.requiresKey === true,
             ),
         );

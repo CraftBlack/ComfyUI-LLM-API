@@ -65,6 +65,10 @@ Grok Build always requires the key (the Tailscale proxy protects every endpoint,
 including `/health`). Custom may run without one: leave `api_key` empty and the
 node sends no `Authorization` header at all.
 
+The real Grok Build hostname is **redacted** in this repo. Set `GROK_BUILD_URL`
+(e.g. `https://<your-tailnet-host>:8443`) or the node's `base_url` to your
+Funnel URL; the committed default points at `redacted.tail341768.ts.net`.
+
 Windows (persists for the user account):
 
 ```powershell
@@ -73,6 +77,7 @@ Windows (persists for the user account):
 [Environment]::SetEnvironmentVariable("BAZAAI_API_KEY", "ks_live_...", "User")
 # Grok Build (Tailscale): copy the key from kunci_api_grok.txt
 [Environment]::SetEnvironmentVariable("GROK_API_KEY", "<key-dari-kunci_api_grok.txt>", "User")
+[Environment]::SetEnvironmentVariable("GROK_BUILD_URL", "https://<your-tailnet-host>:8443", "User")
 ```
 
 Linux / macOS / WSL:
@@ -110,7 +115,7 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 | | CometAPI | Grokified | Coarena | Baza AI | Grok Build | Custom |
 |---|---|---|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://kraplegit.tail341768.ts.net:8443/v1` | anything |
+| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://<redacted>.tail341768.ts.net:8443/v1` | anything |
 | Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `local-model` |
 | Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 1 id (`grok-4.7`) | whatever it serves |
 | Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | all |
@@ -122,7 +127,9 @@ also accept `minimal` and `max`; the node offers all of them. Baza AI reports th
 served model id as `gcli/grok-4.7` and only exposes reasoning text in stream
 deltas. Grok Build is exposed through Tailscale Funnel (`api_server_tailscale.py`,
 local port 8010) and always requires the key from `kunci_api_grok.txt`; paste
-that key into the node's `api_key` field or set `GROK_API_KEY`.
+that key into the node's `api_key` field or set `GROK_API_KEY`. Its hostname is
+redacted here — set `GROK_BUILD_URL` (root URL, `/v1` is appended) or the node's
+`base_url` to your real Funnel URL.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -296,7 +303,7 @@ returns none at all.
 
 | Fact | Evidence |
 |---|---|
-| base URL | `https://kraplegit.tail341768.ts.net:8443/v1` (Tailscale Funnel → local port 8010) |
+| base URL | `https://<redacted>.tail341768.ts.net:8443/v1` (set via `GROK_BUILD_URL`; Tailscale Funnel → local port 8010) |
 | every endpoint requires the key | `/health` and `/v1/models` answer 401 without it; the key is in `kunci_api_grok.txt` |
 | only one model is exposed | `GET /v1/models` returns `grok-4.7` (context 256k, default effort `high`) |
 | the metadata lists xhigh/high/medium/low | the model entry carries `reasoning_efforts` with those ids |
@@ -321,7 +328,7 @@ returns none at all.
 | `HTTP 402` | The account has no credit. Top up, or switch the `provider` dropdown. |
 | `HTTP 401 invalid token` | Wrong or revoked key for that provider. |
 | `model_not_found` (HTTP 503 CometAPI / 404 Coarena / 400 Baza AI `model_not_allowed`) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
-| `Could not reach https://kraplegit.tail341768.ts.net:8443/v1` | The Tailscale proxy is not running. Start `python api_server_tailscale.py` in `Get API Grok Build` (local port 8010), check `--status`, then retry. |
+| `Could not reach https://<redacted>.tail341768.ts.net:8443/v1` | Set `GROK_BUILD_URL` to your real Funnel URL, start `python api_server_tailscale.py` in `Get API Grok Build` (local port 8010), check `--status`, then retry. |
 | Grok Build answers 401 | Use the key from `kunci_api_grok.txt` in the node's `api_key` or `GROK_API_KEY` env; `/health` also requires it. |
 | Grok Build rejects an image | The backend requires at least 512 pixels total; use a larger image. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
@@ -362,18 +369,19 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 285 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 286 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
 COMETAPI_API_KEY=sk-... python tests/probe_reasoning_stream.py   # trace / transport matrix
 COARENA_API_KEY=coa_... python tests/probe_coarena.py      # Coarena capability probe
 BAZAAI_API_KEY=ks_live_... python tests/probe_bazaai.py    # Baza AI capability probe
-GROK_API_KEY=... python tests/probe_grokbuild.py           # Grok Build Tailscale probe
+GROK_BUILD_URL=https://<your-tailnet-host>:8443 GROK_API_KEY=... python tests/probe_grokbuild.py
+                                                           # Grok Build Tailscale probe
 
 # 64 checks - queues real prompts through a running ComfyUI
 # (Coarena is skipped while its gateway reports model_unavailable; Grok Build
-#  is skipped while its local proxy is not running)
+#  is skipped while GROK_BUILD_URL / the proxy is unavailable)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
 # 57 checks - drives a real browser against a running ComfyUI

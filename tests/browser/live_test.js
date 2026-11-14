@@ -124,16 +124,20 @@ async function launch() {
             return { status: r.status, body: await r.json() };
         });
         eq("providers route status", providers.status, 200);
-        eq("provider count", providers.body.providers.length, 4);
+        eq("provider count", providers.body.providers.length, 5);
         eq(
             "provider ids",
             providers.body.providers.map((p) => p.id),
-            ["cometapi", "grokified", "coarena", "custom"],
+            ["cometapi", "grokified", "coarena", "bazaai", "custom"],
         );
         eq("default provider", providers.body.defaultProvider, "cometapi");
         check(
             "coarena is offered",
             providers.body.providers.some((p) => p.id === "coarena" && p.baseUrl === "https://coarena.ai/api/v1"),
+        );
+        check(
+            "bazaai is offered",
+            providers.body.providers.some((p) => p.id === "bazaai" && p.baseUrl === "https://api.baza-ai.org/v1"),
         );
 
         const models = await page.evaluate(async () => {
@@ -291,7 +295,7 @@ async function launch() {
         check("node type is registered", !!def);
         eq("node output names", def.output_name, ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"]);
         eq("node category", def.category, "LLM/API");
-        eq("provider widget choices come from the server", def.input.required.provider[0].length, 4);
+        eq("provider widget choices come from the server", def.input.required.provider[0].length, 5);
         check("image input is optional", !!def.input.optional.image);
         check("VALIDATE_INPUTS makes the model list advisory", def.input.required.model[1].default === "grok-4.7");
 

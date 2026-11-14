@@ -17,6 +17,8 @@ Verified gateway quirks this module compensates for:
 * Coarena answers an unknown model with HTTP **404** and the same
   ``model_not_found`` code; it also only reports ``usage`` on a stream when
   ``stream_options.include_usage`` is sent (see ``Provider.stream_usage``).
+* Baza AI answers an unknown model with HTTP **400** ``model_not_allowed`` -
+  also fatal - and only exposes reasoning text over the stream.
 * CometAPI rejects the literal effort ``"default"``/``"none"`` with HTTP 400,
   so unsupported values are stripped and the call is retried once.
 * Grokified answers an unfunded account with HTTP 402 and a human-readable
@@ -41,12 +43,13 @@ from .providers import (
 )
 
 #: HTTP statuses worth a retry: transient gateway/rate-limit problems.
-RETRY_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 504})
+RETRY_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 #: Error codes that mean "this request will never succeed" regardless of status.
 FATAL_CODES = frozenset(
     {
         "model_not_found",
+        "model_not_allowed",
         "invalid_request_error",
         "invalid_api_key",
         "insufficient_quota",

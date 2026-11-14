@@ -5,8 +5,8 @@ provider from a dropdown — the model list and the reasoning levels follow it
 automatically.
 
 Originally built as the Grokified-specific node, generalised so the same
-workflow can run on **CometAPI**, **Grokified**, **Coarena**, or a **local
-server** without rewiring anything.
+workflow can run on **CometAPI**, **Grokified**, **Coarena**, **Baza AI**, or a
+**local server** without rewiring anything.
 
 ```
 provider ▾  CometAPI (cometapi.com)
@@ -57,6 +57,7 @@ A key is resolved in this order:
 | CometAPI | `COMETAPI_API_KEY` | <https://cometapi.com> → API keys |
 | Grokified | `GROKIFIED_API_KEY` | <https://grokified.com> |
 | Coarena | `COARENA_API_KEY` | <https://coarena.ai/account/api/keys> |
+| Baza AI | `BAZAAI_API_KEY` | your Baza AI account |
 | Custom | `LLM_API_KEY` | optional; local servers usually need none |
 
 Windows (persists for the user account):
@@ -64,6 +65,7 @@ Windows (persists for the user account):
 ```powershell
 [Environment]::SetEnvironmentVariable("COMETAPI_API_KEY", "sk-...", "User")
 [Environment]::SetEnvironmentVariable("COARENA_API_KEY", "coa_...", "User")
+[Environment]::SetEnvironmentVariable("BAZAAI_API_KEY", "ks_live_...", "User")
 ```
 
 Linux / macOS / WSL:
@@ -99,17 +101,19 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 ## Providers
 
-| | CometAPI | Grokified | Coarena | Custom |
-|---|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | anything |
-| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `local-model` |
-| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | whatever it serves |
-| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | all |
-| Vision (data-URI images) | yes | yes | yes | depends |
-| Streaming | yes | yes | yes (usage via `stream_options`) | depends |
+| | CometAPI | Grokified | Coarena | Baza AI | Custom |
+|---|---|---|---|---|---|
+| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | anything |
+| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `local-model` |
+| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | whatever it serves |
+| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | all |
+| Vision (data-URI images) | yes | yes | yes | yes | depends |
+| Streaming | yes | yes | yes (usage via `stream_options`) | yes (reasoning + usage included) | depends |
 
 Coarena's `/models` entry advertises the efforts `low` … `xhigh`, but live calls
-also accept `minimal` and `max`; the node offers all of them.
+also accept `minimal` and `max`; the node offers all of them. Baza AI reports the
+served model id as `gcli/grok-4.7` and only exposes reasoning text in stream
+deltas.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -224,7 +228,8 @@ exactly what the gateway sent — never synthesised, never re-requested.
 
 Coarena behaves the same way: several measured calls billed reasoning tokens
 with 0 characters of `reasoning`/`reasoning_content` (e.g. `low`: 40 tokens, 0
-characters).
+characters). Baza AI only puts the trace in stream deltas; a non-streaming call
+returns none at all.
 
 <details>
 <summary><b>Grokified</b></summary>
@@ -258,6 +263,25 @@ characters).
 
 </details>
 
+<details>
+<summary><b>Baza AI</b> — <code>grok-4.7</code>, 2026-11-15</summary>
+
+| Fact | Evidence |
+|---|---|
+| `grok-4.7` is available | `/models` lists 44 ids including `grok-4.5`, `grok-4.6`, `grok-4.7` |
+| the served model id is namespaced | responses report `model: "gcli/grok-4.7"` for a request for `grok-4.7` |
+| `/models` has no capability metadata | entries only carry `id`, `object`, `owned_by` |
+| both token fields are honoured | `max_tokens: 40` and `max_completion_tokens: 40` each produced exactly 40 completion tokens with `finish_reason: length` |
+| effort `minimal` … `max` are accepted | HTTP 200 for `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `none` answers HTTP 502 | the body was a Cloudflare HTML page, so the node strips `none` |
+| usage is always streamed | the SSE stream carried `usage` even without `stream_options` |
+| reasoning is streamed, not returned non-streamed | stream deltas carry `reasoning_content`; the non-stream `message` object had only `content`, `refusal`, `role` |
+| vision works with data URIs | a 64×64 red PNG returned `Red` |
+| unknown model = **HTTP 400** `model_not_allowed` | `Only Web models are allowed. The model ID must begin with gpt-.` — classified as fatal |
+| bad key = HTTP 401 `invalid_api_key` | `{"error":{"message":"Invalid or revoked API key","code":"invalid_api_key"}}` |
+
+</details>
+
 ---
 
 ## Troubleshooting
@@ -267,7 +291,7 @@ characters).
 | `No API key for ...` | Set the environment variable **and restart ComfyUI**, or paste the key into `api_key`. |
 | `HTTP 402` | The account has no credit. Top up, or switch the `provider` dropdown. |
 | `HTTP 401 invalid token` | Wrong or revoked key for that provider. |
-| `model_not_found` (HTTP 503 CometAPI / 404 Coarena) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
+| `model_not_found` (HTTP 503 CometAPI / 404 Coarena / 400 Baza AI `model_not_allowed`) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
 | Dropdown is empty / status shows `⚠` | `/comfyui_llm_api/models` could not reach the gateway; the static fallback list is shown and the reason is printed in the node. |
 | Output cut off | Raise `max_tokens`; the console logs a warning when `finish_reason` is `length`. |
@@ -306,17 +330,19 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 242 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 261 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
 COMETAPI_API_KEY=sk-... python tests/probe_reasoning_stream.py   # trace / transport matrix
 COARENA_API_KEY=coa_... python tests/probe_coarena.py      # Coarena capability probe
+BAZAAI_API_KEY=ks_live_... python tests/probe_bazaai.py    # Baza AI capability probe
 
-# 54 checks - queues real prompts through a running ComfyUI
+# 58 checks - queues real prompts through a running ComfyUI
+# (Coarena's live checks are skipped while its gateway reports model_unavailable)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
-# 55 checks - drives a real browser against a running ComfyUI
+# 56 checks - drives a real browser against a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
@@ -327,8 +353,9 @@ node contract. It also fails if an API key is ever committed.
 **`tests/live_node_test.py`** builds real prompts, queues them through
 `POST /prompt` and reads `GET /history/<id>` back. It covers text, streaming,
 vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
-Grokified 402 path when the account is unfunded, a Coarena streamed call that
-still reports usage, and `enable_processing = false`.
+Grokified 402 path when the account is unfunded, Coarena and Baza AI streamed
+calls, and `enable_processing = false`. If Coarena's gateway reports
+`model_unavailable`, its three live checks are skipped rather than failed.
 
 **`tests/browser/live_test.js`** is the only thing that can prove the frontend
 half works: it loads ComfyUI in Chromium, injects a workflow whose saved

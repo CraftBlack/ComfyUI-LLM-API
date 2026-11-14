@@ -70,6 +70,13 @@ eq("coarena default model", providers.COARENA.default_model, "grok-4-7")
 check("grok-4-7 in coarena fallback list", "grok-4-7" in providers.COARENA.fallback_models)
 check("coarena accepts minimal/max effort", {"minimal", "max"} <= set(providers.COARENA.reasoning_efforts))
 check("coarena asks for usage on stream", providers.COARENA.stream_usage)
+check("bazaai is registered", "bazaai" in providers.BY_ID)
+eq("bazaai base url", providers.BAZA_AI.base_url, "https://api.baza-ai.org/v1")
+eq("bazaai key env", providers.BAZA_AI.key_env, "BAZAAI_API_KEY")
+eq("bazaai default model", providers.BAZA_AI.default_model, "grok-4.7")
+check("grok-4.7 in bazaai fallback list", "grok-4.7" in providers.BAZA_AI.fallback_models)
+check("bazaai accepts minimal/max effort", {"minimal", "max"} <= set(providers.BAZA_AI.reasoning_efforts))
+check("bazaai keeps the default stream usage", not providers.BAZA_AI.stream_usage)
 check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
 eq("cometapi default model", providers.COMETAPI.default_model, "grok-4.7")
 check("grok-4.7 in cometapi fallback list", "grok-4.7" in providers.COMETAPI.fallback_models)
@@ -98,6 +105,7 @@ eq("all_models has no duplicates", len(models), len(set(models)))
 check("all_models starts with a default", models[0] in {p.default_model for p in providers.PROVIDERS})
 check("all_models contains cometapi-only model", "deepseek-v4.1-flash" in models)
 check("all_models contains grokified-only model", "claude-opus-5" in models)
+check("all_models contains bazaai-only model", "gpt-5.6-sol" in models)
 
 efforts = providers.all_efforts()
 check("all_efforts is the union", {"default", "minimal", "low", "medium", "high", "xhigh", "max"} <= set(efforts))
@@ -170,6 +178,12 @@ b = client.build_body(provider=providers.COARENA, model="grok-4-7", messages=[],
 check("stream_options only rides on a stream", "stream_options" not in b)
 b = client.build_body(provider=providers.COMETAPI, model="m", messages=[], stream=True)
 check("cometapi never sends stream_options", "stream_options" not in b)
+
+b = client.build_body(
+    provider=providers.BAZA_AI, model="grok-4.7", messages=[], max_tokens=99, stream=True
+)
+eq("bazaai uses max_completion_tokens", b.get("max_completion_tokens"), 99)
+check("bazaai does not send stream_options", "stream_options" not in b)
 
 # --------------------------------------------------------------------------- #
 print("== client: parameter downgrade ==")
@@ -256,8 +270,24 @@ check("401 message preserved", "invalid token" in message)
 code, message = client._error_details(FakeResponse(500, None, text="<html>gateway blew up</html>"))
 eq("non-json body falls back to text", message, "<html>gateway blew up</html>")
 
+baza_400 = {
+    "error": {
+        "message": "Only Web models are allowed. The model ID must begin with gpt-.",
+        "type": "model_not_allowed",
+        "code": "model_not_allowed",
+    }
+}
+code, message = client._error_details(FakeResponse(400, baza_400))
+eq("baza 400 code", code, "model_not_allowed")
+check("baza 400 is fatal (no retry storm)", client._is_fatal(400, code, message))
+
 check("429 is retryable", 429 in client.RETRY_STATUSES)
+check("503 is retryable", 503 in client.RETRY_STATUSES)
 check("402 is not retryable", 402 not in client.RETRY_STATUSES)
+check(
+    "model_unavailable stays retryable (not fatal)",
+    not client._is_fatal(503, "model_unavailable", "This model is not available right now."),
+)
 
 # --------------------------------------------------------------------------- #
 print("== client: model catalogue ==")
@@ -522,7 +552,7 @@ check("pyproject repository url", "github.com/CraftBlack/ComfyUI-LLM-API" in tex
 # no secret may be committed anywhere in the pack
 import re  # noqa: E402
 
-secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}")
+secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}|ks_live_[A-Za-z0-9_-]{20,}")
 for path in ROOT.rglob("*"):
     if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
         continue

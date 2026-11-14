@@ -192,6 +192,69 @@ COARENA = Provider(
     stream_usage=True,
 )
 
+BAZA_AI = Provider(
+    id="bazaai",
+    label="Baza AI (baza-ai.org)",
+    base_url="https://api.baza-ai.org/v1",
+    key_env="BAZAAI_API_KEY",
+    key_hint="ks_live_...",
+    default_model="grok-4.7",
+    fallback_models=(
+        "grok-4.7",
+        "gpt-6.1-terra",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "claude-sonnet-5-5",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-haiku-4-5-20251001",
+        "k3.1-pro",
+        "k3",
+        "k2.7-code",
+        "mistral-medium-3.5",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "minimax-m2.7-highspeed",
+        "glm-5.3",
+        "glm-5.3-flash",
+        "glm-5.2",
+        "kimi-k2.6",
+        "mimo-v2.5",
+        "mimo-v2.5-pro",
+        "qwen3.7-plus",
+        "qwen3.6-plus",
+        "glm-5.1",
+        "hy3",
+        "grok-4.5",
+        "grok-4.6",
+        "qwen3.8-max",
+        "gemini-3.1-pro",
+        "gemini-3-flash",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+    ),
+    # Live calls accepted minimal..max (verified 2026-11-15); "none" made the
+    # gateway answer 502, and the node strips both "none" and "default".
+    reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh", "max"),
+    notes=(
+        "/models carries no capability metadata and the response model id is "
+        "namespaced (e.g. gcli/grok-4.7). Reasoning text is streamed only; "
+        "non-stream replies expose none."
+    ),
+)
+
 CUSTOM = Provider(
     id="custom",
     label="Custom / self-hosted (OpenAI-compatible)",
@@ -211,7 +274,7 @@ CUSTOM = Provider(
     supports_detail=False,
 )
 
-PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, CUSTOM)
+PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, BAZA_AI, CUSTOM)
 
 BY_ID: dict[str, Provider] = {p.id: p for p in PROVIDERS}
 BY_LABEL: dict[str, Provider] = {p.label: p for p in PROVIDERS}

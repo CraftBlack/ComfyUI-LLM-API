@@ -55,6 +55,8 @@ class Provider:
     #: local servers and proxies often run without auth; when False an empty
     #: key is sent as no Authorization header instead of raising.
     requires_key: bool = True
+    #: attempts for transient failures; slow/flaky gateways can lower this.
+    max_attempts: int = 4
     #: the gateway only reports ``usage`` over SSE when ``stream_options`` asks
     #: for it (verified on Coarena and Grok Build; CometAPI and Grokified
     #: always include it).
@@ -288,6 +290,40 @@ GROK_BUILD = Provider(
     stream_usage=True,
 )
 
+HOWTOFIX = Provider(
+    id="howtofix",
+    label="HowToFix ID (howtofix.id)",
+    base_url="https://api.howtofix.id/v1",
+    key_env="HOWTOFIX_API_KEY",
+    key_hint="sk-...",
+    default_model="grok-4.7",
+    fallback_models=(
+        "grok-4.7",
+        "grok-4.7-liberated-sg",
+        "grok-4.6",
+        "grok-4.6-liberated-sg",
+        "grok-4.5",
+        "grok-4.5-liberated-sg",
+        "big-pickle",
+        "deepseek-v4.1-flash",
+        "deepseek-v4.1-flash-1017",
+        "deepSeek-v4.1-flash-1017-sg",
+        "glm-5.3-flash",
+        "mimo-2.6-flash",
+    ),
+    # Verified live 2026-11-15: minimal/medium/xhigh answered quickly; low/high
+    # timed out on a 45s read (gateway slowness, not a 400 rejection).
+    reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh"),
+    docs_url="https://howtofix.id/docs",
+    notes=(
+        "Distributor gateway (group free); calls can be slow or bursty (a "
+        "stream took >2 minutes to first byte). max_completion_tokens caps the "
+        "visible answer only; reasoning is added on top and exposed as "
+        "reasoning_content. Usage has no reasoning_tokens field."
+    ),
+    max_attempts=2,
+)
+
 CUSTOM = Provider(
     id="custom",
     label="Custom / self-hosted (OpenAI-compatible)",
@@ -308,7 +344,7 @@ CUSTOM = Provider(
     requires_key=False,
 )
 
-PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, BAZA_AI, GROK_BUILD, CUSTOM)
+PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, BAZA_AI, GROK_BUILD, HOWTOFIX, CUSTOM)
 
 BY_ID: dict[str, Provider] = {p.id: p for p in PROVIDERS}
 BY_LABEL: dict[str, Provider] = {p.label: p for p in PROVIDERS}

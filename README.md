@@ -5,8 +5,9 @@ provider from a dropdown — the model list and the reasoning levels follow it
 automatically.
 
 Originally built as the Grokified-specific node, generalised so the same
-workflow can run on **CometAPI**, **Grokified**, **Coarena**, **Baza AI**, the
-local **Grok Build** proxy, or a **local server** without rewiring anything.
+workflow can run on **CometAPI**, **Grokified**, **Coarena**, **Baza AI**,
+**HowToFix ID**, the local **Grok Build** proxy, or a **local server** without
+rewiring anything.
 
 ```
 provider ▾  CometAPI (cometapi.com)
@@ -58,6 +59,7 @@ A key is resolved in this order:
 | Grokified | `GROKIFIED_API_KEY` | <https://grokified.com> |
 | Coarena | `COARENA_API_KEY` | <https://coarena.ai/account/api/keys> |
 | Baza AI | `BAZAAI_API_KEY` | your Baza AI account |
+| HowToFix ID | `HOWTOFIX_API_KEY` | your HowToFix ID account |
 | Grok Build | `GROK_API_KEY` | required; the key is in `kunci_api_grok.txt` on the proxy machine |
 | Custom | `LLM_API_KEY` | optional; local servers usually need none |
 
@@ -75,6 +77,7 @@ Windows (persists for the user account):
 [Environment]::SetEnvironmentVariable("COMETAPI_API_KEY", "sk-...", "User")
 [Environment]::SetEnvironmentVariable("COARENA_API_KEY", "coa_...", "User")
 [Environment]::SetEnvironmentVariable("BAZAAI_API_KEY", "ks_live_...", "User")
+[Environment]::SetEnvironmentVariable("HOWTOFIX_API_KEY", "sk-...", "User")
 # Grok Build (Tailscale): copy the key from kunci_api_grok.txt
 [Environment]::SetEnvironmentVariable("GROK_API_KEY", "<key-dari-kunci_api_grok.txt>", "User")
 [Environment]::SetEnvironmentVariable("GROK_BUILD_URL", "https://<your-tailnet-host>:8443", "User")
@@ -113,14 +116,14 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 ## Providers
 
-| | CometAPI | Grokified | Coarena | Baza AI | Grok Build | Custom |
-|---|---|---|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://<redacted>.tail341768.ts.net:8443/v1` | anything |
-| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `local-model` |
-| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 1 id (`grok-4.7`) | whatever it serves |
-| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | all |
-| Vision (data-URI images) | yes | yes | yes | yes | yes (≥512 px total) | depends |
-| Streaming | yes | yes | yes (usage via `stream_options`) | yes (reasoning + usage included) | yes (usage via `stream_options`) | depends |
+| | CometAPI | Grokified | Coarena | Baza AI | HowToFix ID | Grok Build | Custom |
+|---|---|---|---|---|---|---|---|
+| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://api.howtofix.id/v1` | `https://<redacted>.tail341768.ts.net:8443/v1` | anything |
+| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `grok-4.7` | `local-model` |
+| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 12 ids | 1 id (`grok-4.7`) | whatever it serves |
+| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` | all |
+| Vision (data-URI images) | yes | yes | yes | yes | yes | yes (≥512 px total) | depends |
+| Streaming | yes | yes | yes (usage via `stream_options`) | yes (reasoning + usage included) | yes (reasoning + usage included) | yes (usage via `stream_options`) | depends |
 
 Coarena's `/models` entry advertises the efforts `low` … `xhigh`, but live calls
 also accept `minimal` and `max`; the node offers all of them. Baza AI reports the
@@ -130,6 +133,10 @@ local port 8010) and always requires the key from `kunci_api_grok.txt`; paste
 that key into the node's `api_key` field or set `GROK_API_KEY`. Its hostname is
 redacted here — set `GROK_BUILD_URL` (root URL, `/v1` is appended) or the node's
 `base_url` to your real Funnel URL.
+
+HowToFix ID is a distributor gateway (`group free`): it can be slow or bursty
+(one stream took >2 minutes to first byte), caps only the visible answer, and
+reports no `reasoning_tokens`. The node retries it twice instead of four times.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -318,6 +325,26 @@ returns none at all.
 
 </details>
 
+<details>
+<summary><b>HowToFix ID</b> — <code>grok-4.7</code>, 2026-11-15</summary>
+
+| Fact | Evidence |
+|---|---|
+| 12 chat models | `/models` lists `grok-4.7`, `grok-4.6`, `grok-4.5`, their `-liberated-sg` variants, plus deepseek/glm/mimo ids |
+| streaming exposes the trace | SSE deltas carry `reasoning_content`; non-stream replies carry it too |
+| usage is streamed by default | the SSE stream carried `usage` without `stream_options` |
+| `max_completion_tokens` caps the **visible** answer | cap 16 returned `1, 2, 3, 4, 5, 6` (16 chars) with `completion_tokens: 362` including reasoning |
+| effort `minimal`/`medium`/`xhigh` answer | HTTP 200 in ~2–4s |
+| `low`/`high`/`max` were slow | 45s read timeouts in the probe — not HTTP 400 rejections; the gateway is bursty |
+| seed/temperature/top_p pass through | HTTP 200 on a combined call |
+| vision works with data URIs | a 64×64 red PNG returned `Red.` |
+| unknown model = **HTTP 503** `model_not_found` | `No available channel for model ... under group free` — fatal, not retried |
+| bad key = HTTP 401 | `Invalid token (request id: ...)` |
+| usage has no `reasoning_tokens` | only `prompt_tokens`, `completion_tokens`, `total_tokens` and `cached_tokens` |
+| slow first byte observed | one stream took >2 minutes to its first byte; the node attempts this provider twice |
+
+</details>
+
 ---
 
 ## Troubleshooting
@@ -327,10 +354,11 @@ returns none at all.
 | `No API key for ...` | Set the environment variable **and restart ComfyUI**, or paste the key into `api_key`. |
 | `HTTP 402` | The account has no credit. Top up, or switch the `provider` dropdown. |
 | `HTTP 401 invalid token` | Wrong or revoked key for that provider. |
-| `model_not_found` (HTTP 503 CometAPI / 404 Coarena / 400 Baza AI `model_not_allowed`) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
+| `model_not_found` (HTTP 503 CometAPI/HowToFix ID, 404 Coarena, 400 Baza AI `model_not_allowed`) | The id is not a chat model on that gateway. Use **LLM API Model List** to see the real list. |
 | `Could not reach https://<redacted>.tail341768.ts.net:8443/v1` | Set `GROK_BUILD_URL` to your real Funnel URL, start `python api_server_tailscale.py` in `Get API Grok Build` (local port 8010), check `--status`, then retry. |
 | Grok Build answers 401 | Use the key from `kunci_api_grok.txt` in the node's `api_key` or `GROK_API_KEY` env; `/health` also requires it. |
 | Grok Build rejects an image | The backend requires at least 512 pixels total; use a larger image. |
+| HowToFix ID times out | The gateway is slow/bursty. Raise `timeout_seconds` or retry with a new `seed`; the node only attempts twice for this provider. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
 | Dropdown is empty / status shows `⚠` | `/comfyui_llm_api/models` could not reach the gateway; the static fallback list is shown and the reason is printed in the node. |
 | Output cut off | Raise `max_tokens`; the console logs a warning when `finish_reason` is `length`. |
@@ -369,7 +397,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 286 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 303 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
@@ -378,13 +406,15 @@ COARENA_API_KEY=coa_... python tests/probe_coarena.py      # Coarena capability 
 BAZAAI_API_KEY=ks_live_... python tests/probe_bazaai.py    # Baza AI capability probe
 GROK_BUILD_URL=https://<your-tailnet-host>:8443 GROK_API_KEY=... python tests/probe_grokbuild.py
                                                            # Grok Build Tailscale probe
+HOWTOFIX_API_KEY=sk-... python tests/probe_howtofix.py     # HowToFix ID capability probe
 
-# 64 checks - queues real prompts through a running ComfyUI
+# 68 checks - queues real prompts through a running ComfyUI
 # (Coarena is skipped while its gateway reports model_unavailable; Grok Build
-#  is skipped while GROK_BUILD_URL / the proxy is unavailable)
+#  is skipped while GROK_BUILD_URL / the proxy is unavailable; HowToFix ID is
+#  skipped when its read times out)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
-# 57 checks - drives a real browser against a running ComfyUI
+# 58 checks - drives a real browser against a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
@@ -396,10 +426,11 @@ node contract. It also fails if an API key is ever committed.
 `POST /prompt` and reads `GET /history/<id>` back. It covers text, streaming,
 vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
 Grokified 402 path when the account is unfunded, Coarena and Baza AI streamed
-calls, the Grok Build Tailscale proxy, and `enable_processing = false`. If
-Coarena's gateway reports `model_unavailable`, its three live checks are skipped
-rather than failed; the Grok Build checks are skipped when the proxy is not
-reachable or `GROK_API_KEY` is missing.
+calls, the Grok Build Tailscale proxy, HowToFix ID (skipped when its read times
+out), and `enable_processing = false`. If Coarena's gateway reports
+`model_unavailable`, its three live checks are skipped rather than failed; the
+Grok Build checks are skipped when the proxy is not reachable or `GROK_API_KEY`
+is missing.
 
 **`tests/browser/live_test.js`** is the only thing that can prove the frontend
 half works: it loads ComfyUI in Chromium, injects a workflow whose saved

@@ -100,6 +100,15 @@ check("grokbuild requires a key", providers.GROK_BUILD.requires_key)
 check("grokbuild key hint names the file", "kunci_api_grok.txt" in providers.GROK_BUILD.key_hint)
 check("grokbuild asks for usage on stream", providers.GROK_BUILD.stream_usage)
 check("custom works without a key", not providers.CUSTOM.requires_key)
+check("howtofix is registered", "howtofix" in providers.BY_ID)
+eq("howtofix base url", providers.HOWTOFIX.base_url, "https://api.howtofix.id/v1")
+eq("howtofix key env", providers.HOWTOFIX.key_env, "HOWTOFIX_API_KEY")
+eq("howtofix default model", providers.HOWTOFIX.default_model, "grok-4.7")
+check("grok-4.7 in howtofix fallback list", "grok-4.7" in providers.HOWTOFIX.fallback_models)
+check("howtofix requires a key", providers.HOWTOFIX.requires_key)
+check("howtofix does not send stream_options", not providers.HOWTOFIX.stream_usage)
+eq("howtofix retries twice", providers.HOWTOFIX.max_attempts, 2)
+check("howtofix has no max effort", "max" not in providers.HOWTOFIX.reasoning_efforts)
 check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
 eq("cometapi default model", providers.COMETAPI.default_model, "grok-4.7")
 check("grok-4.7 in cometapi fallback list", "grok-4.7" in providers.COMETAPI.fallback_models)
@@ -129,6 +138,7 @@ check("all_models starts with a default", models[0] in {p.default_model for p in
 check("all_models contains cometapi-only model", "deepseek-v4.1-flash" in models)
 check("all_models contains grokified-only model", "claude-opus-5" in models)
 check("all_models contains bazaai-only model", "gpt-5.6-sol" in models)
+check("all_models contains howtofix-only model", "big-pickle" in models)
 
 efforts = providers.all_efforts()
 check("all_efforts is the union", {"default", "minimal", "low", "medium", "high", "xhigh", "max"} <= set(efforts))
@@ -223,6 +233,12 @@ b = client.build_body(
 )
 eq("grokbuild uses max_completion_tokens", b.get("max_completion_tokens"), 99)
 eq("grokbuild asks the stream for usage", b.get("stream_options"), {"include_usage": True})
+
+b = client.build_body(
+    provider=providers.HOWTOFIX, model="grok-4.7", messages=[], max_tokens=99, stream=True
+)
+eq("howtofix uses max_completion_tokens", b.get("max_completion_tokens"), 99)
+check("howtofix does not send stream_options", "stream_options" not in b)
 
 # --------------------------------------------------------------------------- #
 print("== client: parameter downgrade ==")
@@ -507,18 +523,26 @@ eq("disabled processing returns empty usage", result[3], "{}")
 
 # an optional-key provider must reach the client without an API key
 original_chat_completion = nodes.chat_completion
-nodes.chat_completion = lambda **kwargs: {
-    "content": "ok",
-    "reasoning": "",
-    "usage": {},
-    "notes": [],
-    "provider": "custom",
-    "provider_label": providers.CUSTOM.label,
-    "base_url": providers.CUSTOM.base_url,
-    "model": "local-model",
-    "streamed": False,
-    "finish_reason": "stop",
-}
+captured: dict = {}
+
+
+def fake_chat_completion(**kwargs):
+    captured.update(kwargs)
+    return {
+        "content": "ok",
+        "reasoning": "",
+        "usage": {},
+        "notes": [],
+        "provider": "custom",
+        "provider_label": providers.CUSTOM.label,
+        "base_url": providers.CUSTOM.base_url,
+        "model": "local-model",
+        "streamed": False,
+        "finish_reason": "stop",
+    }
+
+
+nodes.chat_completion = fake_chat_completion
 saved_llm_key = os.environ.pop("LLM_API_KEY", None)
 try:
     result = node.generate(
@@ -527,6 +551,7 @@ try:
         timeout_seconds=30, api_key="", stream=False,
     )
     eq("custom runs without a key", result[0], "ok")
+    eq("node forwards provider max_attempts", captured.get("max_attempts"), providers.CUSTOM.max_attempts)
 finally:
     nodes.chat_completion = original_chat_completion
     if saved_llm_key is not None:

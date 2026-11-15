@@ -124,11 +124,11 @@ async function launch() {
             return { status: r.status, body: await r.json() };
         });
         eq("providers route status", providers.status, 200);
-        eq("provider count", providers.body.providers.length, 6);
+        eq("provider count", providers.body.providers.length, 7);
         eq(
             "provider ids",
             providers.body.providers.map((p) => p.id),
-            ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "custom"],
+            ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "howtofix", "custom"],
         );
         eq("default provider", providers.body.defaultProvider, "cometapi");
         check(
@@ -147,6 +147,10 @@ async function launch() {
                     p.baseUrl.endsWith(":8443/v1") &&
                     p.requiresKey === true,
             ),
+        );
+        check(
+            "howtofix is offered",
+            providers.body.providers.some((p) => p.id === "howtofix" && p.baseUrl === "https://api.howtofix.id/v1"),
         );
 
         const models = await page.evaluate(async () => {
@@ -304,7 +308,7 @@ async function launch() {
         check("node type is registered", !!def);
         eq("node output names", def.output_name, ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"]);
         eq("node category", def.category, "LLM/API");
-        eq("provider widget choices come from the server", def.input.required.provider[0].length, 6);
+        eq("provider widget choices come from the server", def.input.required.provider[0].length, 7);
         check("image input is optional", !!def.input.optional.image);
         check("VALIDATE_INPUTS makes the model list advisory", def.input.required.model[1].default === "grok-4.7");
 

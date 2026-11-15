@@ -368,6 +368,7 @@ class LLMAPITextProcessor:
             stream=bool(stream),
             max_tokens_param=max_tokens_param,
             extra_body=extra_body,
+            max_attempts=selected.max_attempts,
             on_delta=on_delta if progress is not None else None,
         )
         elapsed = time.perf_counter() - started

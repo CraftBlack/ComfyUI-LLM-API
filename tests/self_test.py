@@ -109,6 +109,28 @@ check("howtofix requires a key", providers.HOWTOFIX.requires_key)
 check("howtofix does not send stream_options", not providers.HOWTOFIX.stream_usage)
 eq("howtofix retries twice", providers.HOWTOFIX.max_attempts, 2)
 check("howtofix has no max effort", "max" not in providers.HOWTOFIX.reasoning_efforts)
+check("cloudflare is registered", "cloudflare" in providers.BY_ID)
+expected_cf_base = (
+    "https://api.cloudflare.com/client/v4/accounts/"
+    f"{os.environ.get('CLOUDFLARE_ACCOUNT_ID') or 'redacted'}/ai/v1"
+)
+eq("cloudflare base url", providers.CLOUDFLARE.base_url, expected_cf_base)
+eq("cloudflare key env", providers.CLOUDFLARE.key_env, "CLOUDFLARE_API_TOKEN")
+eq("cloudflare default model", providers.CLOUDFLARE.default_model, "@cf/google/gemma-4-26b-a4b-it")
+check("cloudflare fallback list", providers.CLOUDFLARE.fallback_models == ("@cf/google/gemma-4-26b-a4b-it",))
+check("cloudflare requires a key", providers.CLOUDFLARE.requires_key)
+check("cloudflare does not send stream_options", not providers.CLOUDFLARE.stream_usage)
+check("cloudflare offers high effort", "high" in providers.CLOUDFLARE.reasoning_efforts)
+saved_cf_account = os.environ.pop("CLOUDFLARE_ACCOUNT_ID", None)
+try:
+    eq(
+        "cloudflare default is redacted",
+        providers._cloudflare_base(),
+        "https://api.cloudflare.com/client/v4/accounts/redacted/ai/v1",
+    )
+finally:
+    if saved_cf_account is not None:
+        os.environ["CLOUDFLARE_ACCOUNT_ID"] = saved_cf_account
 check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
 eq("cometapi default model", providers.COMETAPI.default_model, "grok-4.7")
 check("grok-4.7 in cometapi fallback list", "grok-4.7" in providers.COMETAPI.fallback_models)
@@ -139,6 +161,7 @@ check("all_models contains cometapi-only model", "deepseek-v4.1-flash" in models
 check("all_models contains grokified-only model", "claude-opus-5" in models)
 check("all_models contains bazaai-only model", "gpt-5.6-sol" in models)
 check("all_models contains howtofix-only model", "big-pickle" in models)
+check("all_models contains the cloudflare model", "@cf/google/gemma-4-26b-a4b-it" in models)
 
 efforts = providers.all_efforts()
 check("all_efforts is the union", {"default", "minimal", "low", "medium", "high", "xhigh", "max"} <= set(efforts))
@@ -239,6 +262,16 @@ b = client.build_body(
 )
 eq("howtofix uses max_completion_tokens", b.get("max_completion_tokens"), 99)
 check("howtofix does not send stream_options", "stream_options" not in b)
+
+b = client.build_body(
+    provider=providers.CLOUDFLARE,
+    model="@cf/google/gemma-4-26b-a4b-it",
+    messages=[],
+    max_tokens=99,
+    stream=True,
+)
+eq("cloudflare uses max_completion_tokens", b.get("max_completion_tokens"), 99)
+check("cloudflare does not send stream_options", "stream_options" not in b)
 
 # --------------------------------------------------------------------------- #
 print("== client: parameter downgrade ==")
@@ -343,6 +376,27 @@ grokbuild_404 = {
 code, message = client._error_details(FakeResponse(404, grokbuild_404))
 eq("grokbuild 404 code", code, "not-found")
 check("grokbuild 404 is fatal", client._is_fatal(404, code, message))
+
+cf_400 = {
+    "errors": [{"message": "AiError: No such model: @cf/definitely-not-a-model", "code": 5007}],
+    "success": False,
+    "result": {},
+    "messages": [],
+}
+code, message = client._error_details(FakeResponse(400, cf_400))
+eq("cloudflare 400 code", code, "5007")
+check("cloudflare 400 message preserved", "No such model" in message)
+check("cloudflare 400 is fatal", client._is_fatal(400, code, message))
+
+cf_401 = {
+    "result": None,
+    "success": False,
+    "errors": [{"code": 10000, "message": "Authentication error"}],
+    "messages": [],
+}
+code, message = client._error_details(FakeResponse(401, cf_401))
+eq("cloudflare 401 code", code, "10000")
+eq("cloudflare 401 message", message, "Authentication error")
 
 check("429 is retryable", 429 in client.RETRY_STATUSES)
 check("503 is retryable", 503 in client.RETRY_STATUSES)
@@ -602,6 +656,13 @@ eq("usage drops nulls", set(numbers), {"prompt_tokens", "completion_tokens", "to
                                        "reasoning_tokens", "cached_tokens", "image_tokens"})
 eq("usage reads reasoning_tokens", numbers["reasoning_tokens"], 4)
 
+cf_numbers = nodes._usage_numbers(
+    {"prompt_tokens": 18, "completion_tokens": 78, "total_tokens": 96, "neurons": 2.5}
+)
+eq("usage reads neurons", cf_numbers["neurons"], 2.5)
+cf_perf = nodes._format_perf(providers.CLOUDFLARE.label, "@cf/google/gemma-4-26b-a4b-it", cf_numbers, 1.0, False)
+check("perf shows neurons", "2.50 neurons" in cf_perf, cf_perf)
+
 # model-list node with a stubbed catalogue
 original_list_models = nodes.list_models
 nodes.list_models = lambda *a, **k: (["grok-4.7", "grok-build-0.1", "deepseek-v4.1-flash"], None)
@@ -651,7 +712,7 @@ check("pyproject repository url", "github.com/CraftBlack/ComfyUI-LLM-API" in tex
 # no secret may be committed anywhere in the pack
 import re  # noqa: E402
 
-secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}|ks_live_[A-Za-z0-9_-]{20,}")
+secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}|ks_live_[A-Za-z0-9_-]{20,}|cfut_[A-Za-z0-9]{20,}")
 for path in ROOT.rglob("*"):
     if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
         continue

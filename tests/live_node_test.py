@@ -148,14 +148,14 @@ if "LLMAPITextProcessor" not in object_info:
 definition = object_info["LLMAPITextProcessor"]
 eq("output names", definition["output_name"], ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"])
 eq("category", definition["category"], "LLM/API")
-eq("provider choices", len(definition["input"]["required"]["provider"][0]), 7)
+eq("provider choices", len(definition["input"]["required"]["provider"][0]), 8)
 check("image is optional", "image" in definition["input"]["optional"])
 eq("required inputs contain no image", "image" in definition["input"]["required"], False)
 check("no duplicate route warning for our prefix", True)
 
 print("\n== HTTP routes ==")
 registry = get("/comfyui_llm_api/providers")
-eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "howtofix", "custom"])
+eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "howtofix", "cloudflare", "custom"])
 eq("registry default", registry["defaultProvider"], "cometapi")
 
 models = get("/comfyui_llm_api/models?provider=cometapi")
@@ -176,6 +176,12 @@ models_gb = get("/comfyui_llm_api/models?provider=grokbuild")
 check("grokbuild catalogue has grok-4.7", "grok-4.7" in models_gb["models"], str(models_gb["models"])[:160])
 models_h = get("/comfyui_llm_api/models?provider=howtofix")
 check("howtofix catalogue has grok-4.7", "grok-4.7" in models_h["models"], str(models_h["models"])[:160])
+models_cf = get("/comfyui_llm_api/models?provider=cloudflare")
+check(
+    "cloudflare catalogue has the gemma model",
+    "@cf/google/gemma-4-26b-a4b-it" in models_cf["models"],
+    str(models_cf["models"])[:160],
+)
 
 # --------------------------------------------------------------------------- #
 print("\n== A. text only, non-streaming, effort=default (field omitted) ==")
@@ -485,6 +491,53 @@ else:
         check("howtofix error is explained", bool(detail), detail[:160])
     else:
         check("reports the missing env var", "HOWTOFIX_API_KEY" in detail, detail[:160])
+
+# --------------------------------------------------------------------------- #
+print("\n== M. cloudflare: live call ==")
+CF_ACCOUNT = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+CF_TOKEN = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+if CF_ACCOUNT and CF_TOKEN:
+    graph_m = {
+        "1": {
+            "class_type": "LLMAPITextProcessor",
+            "inputs": node_inputs(
+                provider="Cloudflare Workers AI (cloudflare.com)",
+                model="@cf/google/gemma-4-26b-a4b-it",
+                system_prompt="none",
+                prompt="Say OK",
+                max_tokens=256,
+                temperature=0.7,
+                top_p=0.95,
+                reasoning_effort="default",
+                seed=1,
+                timeout_seconds=60,
+                stream=True,
+                base_url=f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT}/ai/v1",
+                api_key=CF_TOKEN,
+            ),
+        },
+        "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+        "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 3]}},
+    }
+    history, seconds = run("M", graph_m, timeout=180)
+    detail = error_text(history)
+    if status_of(history) == "success":
+        answer = text_of(history, "2")
+        check("cloudflare answered", bool(answer.strip()), answer[:120])
+        usage = json.loads(text_of(history, "3") or "{}")
+        eq("cloudflare usage names the provider", usage.get("provider"), "cloudflare")
+        check("cloudflare reports usage on a streamed call", usage.get("completion_tokens", 0) > 0, str(usage))
+        check("cloudflare reports neurons", usage.get("neurons", 0) > 0, str(usage))
+        print(f"  ({seconds:.1f}s) answer={answer[:40]!r} usage={usage.get('completion_tokens')} completion, "
+              f"{usage.get('neurons')} neurons")
+    elif "ReadTimeout" in detail or "timed out" in detail.lower():
+        check("cloudflare timed out (live checks skipped)", True)
+    else:
+        eq("status is an error", status_of(history), "error")
+        check("cloudflare error is explained", bool(detail), detail[:160])
+else:
+    check("cloudflare env is not set (live checks skipped)", True)
+    print("  set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN")
 
 # --------------------------------------------------------------------------- #
 print()

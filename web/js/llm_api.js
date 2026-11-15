@@ -169,6 +169,17 @@ const BUILTIN_REGISTRY = {
             requiresKey: true,
         },
         {
+            id: "cloudflare",
+            label: "Cloudflare Workers AI (cloudflare.com)",
+            baseUrl: "https://api.cloudflare.com/client/v4/accounts/redacted/ai/v1",
+            keyEnv: "CLOUDFLARE_API_TOKEN",
+            keyHint: "cfut_...",
+            defaultModel: "@cf/google/gemma-4-26b-a4b-it",
+            models: ["@cf/google/gemma-4-26b-a4b-it"],
+            efforts: ["default", "low", "medium", "high", "max"],
+            requiresKey: true,
+        },
+        {
             id: "custom",
             label: "Custom / self-hosted (OpenAI-compatible)",
             baseUrl: "http://127.0.0.1:1234/v1",

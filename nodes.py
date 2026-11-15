@@ -56,6 +56,7 @@ def _usage_numbers(usage: dict) -> dict:
         "charged_usd": grokified.get("charged_usd"),
         "list_usd": grokified.get("list_usd"),
         "balance_usd": grokified.get("balance_usd"),
+        "neurons": usage.get("neurons"),
     }
     # drop the nulls so USAGE_JSON stays readable
     return {k: v for k, v in numbers.items() if v is not None}
@@ -82,6 +83,11 @@ def _format_perf(provider_label: str, model: str, numbers: dict, elapsed: float,
             pass
     if numbers.get("balance_usd") is not None:
         parts.append(f"balance ${float(numbers['balance_usd']):.2f}")
+    if numbers.get("neurons") is not None:
+        try:
+            parts.append(f"{float(numbers['neurons']):.2f} neurons")
+        except (TypeError, ValueError):
+            pass
     return f"{provider_label.split(' (')[0]} | " + " | ".join(parts)
 
 

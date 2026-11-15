@@ -324,6 +324,34 @@ HOWTOFIX = Provider(
     max_attempts=2,
 )
 
+def _cloudflare_base() -> str:
+    """The real account id comes from CLOUDFLARE_ACCOUNT_ID; default redacted."""
+    account = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "redacted").strip()
+    return f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1"
+
+
+CLOUDFLARE = Provider(
+    id="cloudflare",
+    label="Cloudflare Workers AI (cloudflare.com)",
+    base_url=_cloudflare_base(),
+    key_env="CLOUDFLARE_API_TOKEN",
+    key_hint="cfut_...",
+    default_model="@cf/google/gemma-4-26b-a4b-it",
+    fallback_models=("@cf/google/gemma-4-26b-a4b-it",),
+    # Verified live 2026-11-15: low/medium/high/max answered; the model always
+    # emits reasoning, so "none" does not turn the trace off.
+    reasoning_efforts=("default", "low", "medium", "high", "max"),
+    docs_url="https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/",
+    notes=(
+        "OpenAI-compatible Workers AI endpoint. Set CLOUDFLARE_ACCOUNT_ID "
+        "(the committed default is redacted) and CLOUDFLARE_API_TOKEN. "
+        "GET /v1/models is not supported (405), so the combo uses a static "
+        "fallback; type other @cf/ ids into model_override. The default "
+        "gemma-4-26b-a4b-it is text+vision+reasoning (256k context), and "
+        "max_completion_tokens caps reasoning+content together."
+    ),
+)
+
 CUSTOM = Provider(
     id="custom",
     label="Custom / self-hosted (OpenAI-compatible)",
@@ -344,7 +372,16 @@ CUSTOM = Provider(
     requires_key=False,
 )
 
-PROVIDERS: tuple[Provider, ...] = (COMETAPI, GROKIFIED, COARENA, BAZA_AI, GROK_BUILD, HOWTOFIX, CUSTOM)
+PROVIDERS: tuple[Provider, ...] = (
+    COMETAPI,
+    GROKIFIED,
+    COARENA,
+    BAZA_AI,
+    GROK_BUILD,
+    HOWTOFIX,
+    CLOUDFLARE,
+    CUSTOM,
+)
 
 BY_ID: dict[str, Provider] = {p.id: p for p in PROVIDERS}
 BY_LABEL: dict[str, Provider] = {p.label: p for p in PROVIDERS}

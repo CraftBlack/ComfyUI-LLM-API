@@ -21,6 +21,8 @@ Verified gateway quirks this module compensates for:
   also fatal - and only exposes reasoning text over the stream.
 * Grok Build is a loopback proxy that runs without auth by default, so
   providers can declare ``requires_key=False``.
+* Cloudflare Workers AI wraps errors in an ``errors`` array and has no
+  ``GET /v1/models`` endpoint, so the provider falls back to a static list.
 * CometAPI rejects the literal effort ``"default"``/``"none"`` with HTTP 400,
   so unsupported values are stripped and the call is retried once.
 * Grokified answers an unfunded account with HTTP 402 and a human-readable
@@ -166,6 +168,14 @@ def _error_details(response: requests.Response) -> tuple[str, str]:
     if isinstance(error, str):
         return str(payload.get("code") or ""), error[:800]
     if not isinstance(error, dict):
+        # Cloudflare Workers AI: {"errors":[{"code":5007,"message":"..."}]}
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            first = errors[0] if isinstance(errors[0], dict) else {}
+            return (
+                str(first.get("code") or payload.get("code") or ""),
+                str(first.get("message") or payload.get("message") or payload)[:800],
+            )
         return str(payload.get("code") or ""), str(payload.get("message") or payload)[:800]
 
     code = str(error.get("code") or payload.get("code") or "")
@@ -192,7 +202,7 @@ def _is_fatal(status: int, code: str, message: str) -> bool:
     if code and code in FATAL_CODES:
         return True
     text = (message or "").lower()
-    return "model_not_found" in text or "no available channel" in text
+    return "model_not_found" in text or "no available channel" in text or "no such model" in text
 
 
 # --------------------------------------------------------------------------- #

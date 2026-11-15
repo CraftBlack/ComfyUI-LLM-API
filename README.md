@@ -6,8 +6,8 @@ automatically.
 
 Originally built as the Grokified-specific node, generalised so the same
 workflow can run on **CometAPI**, **Grokified**, **Coarena**, **Baza AI**,
-**HowToFix ID**, the local **Grok Build** proxy, or a **local server** without
-rewiring anything.
+**HowToFix ID**, **Cloudflare Workers AI**, the local **Grok Build** proxy, or
+a **local server** without rewiring anything.
 
 ```
 provider ▾  CometAPI (cometapi.com)
@@ -60,12 +60,16 @@ A key is resolved in this order:
 | Coarena | `COARENA_API_KEY` | <https://coarena.ai/account/api/keys> |
 | Baza AI | `BAZAAI_API_KEY` | your Baza AI account |
 | HowToFix ID | `HOWTOFIX_API_KEY` | your HowToFix ID account |
+| Cloudflare Workers AI | `CLOUDFLARE_API_TOKEN` | your Cloudflare API token; also set `CLOUDFLARE_ACCOUNT_ID` |
 | Grok Build | `GROK_API_KEY` | required; the key is in `kunci_api_grok.txt` on the proxy machine |
 | Custom | `LLM_API_KEY` | optional; local servers usually need none |
 
 Grok Build always requires the key (the Tailscale proxy protects every endpoint,
 including `/health`). Custom may run without one: leave `api_key` empty and the
 node sends no `Authorization` header at all.
+
+Cloudflare Workers AI also needs `CLOUDFLARE_ACCOUNT_ID` to build the endpoint
+URL; the committed default is redacted.
 
 The real Grok Build hostname is **redacted** in this repo. Set `GROK_BUILD_URL`
 (e.g. `https://<your-tailnet-host>:8443`) or the node's `base_url` to your
@@ -78,6 +82,8 @@ Windows (persists for the user account):
 [Environment]::SetEnvironmentVariable("COARENA_API_KEY", "coa_...", "User")
 [Environment]::SetEnvironmentVariable("BAZAAI_API_KEY", "ks_live_...", "User")
 [Environment]::SetEnvironmentVariable("HOWTOFIX_API_KEY", "sk-...", "User")
+[Environment]::SetEnvironmentVariable("CLOUDFLARE_ACCOUNT_ID", "<account-id>", "User")
+[Environment]::SetEnvironmentVariable("CLOUDFLARE_API_TOKEN", "cfut_...", "User")
 # Grok Build (Tailscale): copy the key from kunci_api_grok.txt
 [Environment]::SetEnvironmentVariable("GROK_API_KEY", "<key-dari-kunci_api_grok.txt>", "User")
 [Environment]::SetEnvironmentVariable("GROK_BUILD_URL", "https://<your-tailnet-host>:8443", "User")
@@ -116,14 +122,14 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 ## Providers
 
-| | CometAPI | Grokified | Coarena | Baza AI | HowToFix ID | Grok Build | Custom |
-|---|---|---|---|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://api.howtofix.id/v1` | `https://<redacted>.tail341768.ts.net:8443/v1` | anything |
-| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `grok-4.7` | `local-model` |
-| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 12 ids | 1 id (`grok-4.7`) | whatever it serves |
-| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` | all |
-| Vision (data-URI images) | yes | yes | yes | yes | yes | yes (≥512 px total) | depends |
-| Streaming | yes | yes | yes (usage via `stream_options`) | yes (reasoning + usage included) | yes (reasoning + usage included) | yes (usage via `stream_options`) | depends |
+| | CometAPI | Grokified | Coarena | Baza AI | HowToFix ID | Cloudflare | Grok Build | Custom |
+|---|---|---|---|---|---|---|---|---|
+| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://api.howtofix.id/v1` | `https://api.cloudflare.com/client/v4/accounts/<redacted>/ai/v1` | `https://<redacted>.tail341768.ts.net:8443/v1` | anything |
+| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `@cf/google/gemma-4-26b-a4b-it` | `grok-4.7` | `local-model` |
+| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 12 ids | 1 id (static; `/v1/models` is 405) | 1 id (`grok-4.7`) | whatever it serves |
+| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | `low` `medium` `high` `max` | `minimal` `low` `medium` `high` `xhigh` | all |
+| Vision (data-URI images) | yes | yes | yes | yes | yes | yes | yes (≥512 px total) | depends |
+| Streaming | yes | yes | yes (usage via `stream_options`) | yes (reasoning + usage included) | yes (reasoning + usage included) | yes (reasoning + usage included) | yes (usage via `stream_options`) | depends |
 
 Coarena's `/models` entry advertises the efforts `low` … `xhigh`, but live calls
 also accept `minimal` and `max`; the node offers all of them. Baza AI reports the
@@ -137,6 +143,12 @@ redacted here — set `GROK_BUILD_URL` (root URL, `/v1` is appended) or the node
 HowToFix ID is a distributor gateway (`group free`): it can be slow or bursty
 (one stream took >2 minutes to first byte), caps only the visible answer, and
 reports no `reasoning_tokens`. The node retries it twice instead of four times.
+
+Cloudflare Workers AI needs `CLOUDFLARE_ACCOUNT_ID` for the URL and
+`CLOUDFLARE_API_TOKEN` for auth; the committed account default is redacted.
+`/v1/models` is not supported (405), so the combo uses a static gemma fallback —
+type other `@cf/...` ids into `model_override`. Its token cap covers
+reasoning+content together, and `usage` reports Cloudflare's `neurons` cost.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -345,6 +357,24 @@ returns none at all.
 
 </details>
 
+<details>
+<summary><b>Cloudflare Workers AI</b> — <code>@cf/google/gemma-4-26b-a4b-it</code>, 2026-11-15</summary>
+
+| Fact | Evidence |
+|---|---|
+| default model is text+vision+reasoning | docs list all three; a live vision call returned `Red` |
+| context 256k | model docs |
+| `/v1/models` is not supported | `GET .../ai/v1/models` → HTTP 405 `{"errors":[{"code":7001,...}]}` |
+| streaming exposes the trace and usage | SSE deltas carry `reasoning` (or `reasoning_content` when `stream_options` is sent); `usage` arrives without it |
+| token cap includes reasoning | `max_tokens: 16` and `max_completion_tokens: 16` both returned 16 completion tokens with empty content |
+| reasoning_effort is accepted | HTTP 200 for default/none/low/medium/high/max; the model always reasons |
+| seed/temperature/top_p pass through | HTTP 200 |
+| usage reports neurons | `usage.neurons` is Cloudflare's cost metric |
+| unknown model = **HTTP 400** `errors[0].code=5007` | `No such model @cf/...` — classified as fatal |
+| bad key = **HTTP 401** `errors[0].code=10000` | `Authentication error` |
+
+</details>
+
 ---
 
 ## Troubleshooting
@@ -359,6 +389,9 @@ returns none at all.
 | Grok Build answers 401 | Use the key from `kunci_api_grok.txt` in the node's `api_key` or `GROK_API_KEY` env; `/health` also requires it. |
 | Grok Build rejects an image | The backend requires at least 512 pixels total; use a larger image. |
 | HowToFix ID times out | The gateway is slow/bursty. Raise `timeout_seconds` or retry with a new `seed`; the node only attempts twice for this provider. |
+| Cloudflare `/v1/models` shows 405 / empty combo | The OpenAI-compatible endpoint has no model list; the static gemma fallback is used. Type other `@cf/...` ids into `model_override`. |
+| Cloudflare answers 401 | Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`; the account id is part of the URL. |
+| Cloudflare 400 `No such model` | The `@cf/...` id is wrong or not enabled for your account. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
 | Dropdown is empty / status shows `⚠` | `/comfyui_llm_api/models` could not reach the gateway; the static fallback list is shown and the reason is printed in the node. |
 | Output cut off | Raise `max_tokens`; the console logs a warning when `finish_reason` is `length`. |
@@ -397,7 +430,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 303 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 327 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
@@ -407,14 +440,15 @@ BAZAAI_API_KEY=ks_live_... python tests/probe_bazaai.py    # Baza AI capability 
 GROK_BUILD_URL=https://<your-tailnet-host>:8443 GROK_API_KEY=... python tests/probe_grokbuild.py
                                                            # Grok Build Tailscale probe
 HOWTOFIX_API_KEY=sk-... python tests/probe_howtofix.py     # HowToFix ID capability probe
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=cfut_... python tests/probe_cloudflare.py
+                                                           # Cloudflare Workers AI probe
 
-# 68 checks - queues real prompts through a running ComfyUI
-# (Coarena is skipped while its gateway reports model_unavailable; Grok Build
-#  is skipped while GROK_BUILD_URL / the proxy is unavailable; HowToFix ID is
-#  skipped when its read times out)
+# 70 checks - queues real prompts through a running ComfyUI
+# (the count varies: Coarena is skipped on model_unavailable, Grok Build when
+#  its proxy is down, HowToFix ID on read timeout, Cloudflare without env)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
-# 58 checks - drives a real browser against a running ComfyUI
+# 59 checks - drives a real browser against a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
@@ -427,10 +461,10 @@ node contract. It also fails if an API key is ever committed.
 vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
 Grokified 402 path when the account is unfunded, Coarena and Baza AI streamed
 calls, the Grok Build Tailscale proxy, HowToFix ID (skipped when its read times
-out), and `enable_processing = false`. If Coarena's gateway reports
-`model_unavailable`, its three live checks are skipped rather than failed; the
-Grok Build checks are skipped when the proxy is not reachable or `GROK_API_KEY`
-is missing.
+out), Cloudflare Workers AI, and `enable_processing = false`. If Coarena's
+gateway reports `model_unavailable`, its three live checks are skipped rather
+than failed; the Grok Build checks are skipped when the proxy is not reachable or
+`GROK_API_KEY` is missing.
 
 **`tests/browser/live_test.js`** is the only thing that can prove the frontend
 half works: it loads ComfyUI in Chromium, injects a workflow whose saved

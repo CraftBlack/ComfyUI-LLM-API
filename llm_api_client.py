@@ -169,13 +169,16 @@ def _error_details(response: requests.Response) -> tuple[str, str]:
         return str(payload.get("code") or ""), error[:800]
     if not isinstance(error, dict):
         # Cloudflare Workers AI: {"errors":[{"code":5007,"message":"..."}]}
+        # Crusoe: {"errors":["Authentication failed"], ...}
         errors = payload.get("errors")
         if isinstance(errors, list) and errors:
-            first = errors[0] if isinstance(errors[0], dict) else {}
-            return (
-                str(first.get("code") or payload.get("code") or ""),
-                str(first.get("message") or payload.get("message") or payload)[:800],
-            )
+            first = errors[0]
+            if isinstance(first, dict):
+                return (
+                    str(first.get("code") or payload.get("code") or ""),
+                    str(first.get("message") or payload.get("message") or payload)[:800],
+                )
+            return str(payload.get("code") or ""), str(first or payload.get("message") or payload)[:800]
         return str(payload.get("code") or ""), str(payload.get("message") or payload)[:800]
 
     code = str(error.get("code") or payload.get("code") or "")
@@ -202,7 +205,12 @@ def _is_fatal(status: int, code: str, message: str) -> bool:
     if code and code in FATAL_CODES:
         return True
     text = (message or "").lower()
-    return "model_not_found" in text or "no available channel" in text or "no such model" in text
+    return (
+        "model_not_found" in text
+        or "no available channel" in text
+        or "no such model" in text
+        or "is not a valid model" in text
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -218,16 +226,28 @@ def clear_model_cache() -> None:
     _MODEL_CACHE["errors"].clear()
 
 
+def _nested(item: Any, key: str) -> Any:
+    value = item
+    for part in key.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
 def _filter_models(provider: Provider, items: list[Any]) -> list[str]:
     models: list[str] = []
     for item in items:
         if isinstance(item, dict):
             model_id = item.get("id")
             if provider.model_filter_key and provider.model_filter_value:
-                tags = item.get(provider.model_filter_key) or []
-                if isinstance(tags, str):
-                    tags = [tags]
-                if provider.model_filter_value not in tags:
+                raw = _nested(item, provider.model_filter_key) or []
+                tags = raw if isinstance(raw, list) else [raw]
+                if provider.model_filter_mode == "contains":
+                    keep = any(provider.model_filter_value in str(tag) for tag in tags)
+                else:
+                    keep = provider.model_filter_value in tags
+                if not keep:
                     continue
         else:
             model_id = item
@@ -420,6 +440,7 @@ def _parse_stream(
     usage: dict[str, Any] = {}
     finish_reason = None
     model = None
+    upstream_provider = None
 
     for raw in response.iter_lines(decode_unicode=False):
         if not raw:
@@ -441,6 +462,8 @@ def _parse_stream(
 
         if isinstance(chunk.get("model"), str):
             model = chunk["model"]
+        if isinstance(chunk.get("provider"), str):
+            upstream_provider = chunk["provider"]
         if isinstance(chunk.get("usage"), dict) and chunk["usage"]:
             usage = chunk["usage"]
         # some servers attach the error inside the stream instead of a status
@@ -480,7 +503,7 @@ def _parse_stream(
         "content": "".join(content),
         "reasoning": "".join(reasoning),
         "refusal": refusal,
-        "usage": usage,
+        "usage": {**usage, "provider": upstream_provider} if upstream_provider else usage,
         "finish_reason": finish_reason,
         "model": model,
         "streamed": True,

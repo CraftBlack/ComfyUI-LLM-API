@@ -49,14 +49,23 @@ def _usage_numbers(usage: dict) -> dict:
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
         "total_tokens": usage.get("total_tokens"),
-        "reasoning_tokens": details.get("reasoning_tokens"),
+        "reasoning_tokens": (
+            details.get("reasoning_tokens")
+            if details.get("reasoning_tokens") is not None
+            else usage.get("reasoning_tokens")
+        ),
         "cached_tokens": prompt_details.get("cached_tokens"),
         "image_tokens": prompt_details.get("image_tokens"),
-        "cost_usd": usage.get("cost_usd"),
+        "cost_usd": (
+            usage.get("cost_usd")
+            if usage.get("cost_usd") is not None
+            else usage.get("cost")
+        ),
         "charged_usd": grokified.get("charged_usd"),
         "list_usd": grokified.get("list_usd"),
         "balance_usd": grokified.get("balance_usd"),
         "neurons": usage.get("neurons"),
+        "upstream_provider": usage.get("provider"),
     }
     # drop the nulls so USAGE_JSON stays readable
     return {k: v for k, v in numbers.items() if v is not None}

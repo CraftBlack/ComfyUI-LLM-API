@@ -6,8 +6,9 @@ automatically.
 
 Originally built as the Grokified-specific node, generalised so the same
 workflow can run on **CometAPI**, **Grokified**, **Coarena**, **Baza AI**,
-**HowToFix ID**, **Cloudflare Workers AI**, the local **Grok Build** proxy, or
-a **local server** without rewiring anything.
+**HowToFix ID**, **Cloudflare Workers AI**, **Crusoe Cloud**, **FastRouter**,
+the local **Grok Build** proxy, or a **local server** without rewiring
+anything.
 
 ```
 provider ▾  CometAPI (cometapi.com)
@@ -61,6 +62,8 @@ A key is resolved in this order:
 | Baza AI | `BAZAAI_API_KEY` | your Baza AI account |
 | HowToFix ID | `HOWTOFIX_API_KEY` | your HowToFix ID account |
 | Cloudflare Workers AI | `CLOUDFLARE_API_TOKEN` | your Cloudflare API token; also set `CLOUDFLARE_ACCOUNT_ID` |
+| Crusoe | `CRUSOE_API_KEY` | your Crusoe Cloud account |
+| FastRouter | `FASTROUTER_API_KEY` | your FastRouter account |
 | Grok Build | `GROK_API_KEY` | required; the key is in `kunci_api_grok.txt` on the proxy machine |
 | Custom | `LLM_API_KEY` | optional; local servers usually need none |
 
@@ -84,6 +87,8 @@ Windows (persists for the user account):
 [Environment]::SetEnvironmentVariable("HOWTOFIX_API_KEY", "sk-...", "User")
 [Environment]::SetEnvironmentVariable("CLOUDFLARE_ACCOUNT_ID", "<account-id>", "User")
 [Environment]::SetEnvironmentVariable("CLOUDFLARE_API_TOKEN", "cfut_...", "User")
+[Environment]::SetEnvironmentVariable("CRUSOE_API_KEY", "<crusoe-key>", "User")
+[Environment]::SetEnvironmentVariable("FASTROUTER_API_KEY", "sk-v1-...", "User")
 # Grok Build (Tailscale): copy the key from kunci_api_grok.txt
 [Environment]::SetEnvironmentVariable("GROK_API_KEY", "<key-dari-kunci_api_grok.txt>", "User")
 [Environment]::SetEnvironmentVariable("GROK_BUILD_URL", "https://<your-tailnet-host>:8443", "User")
@@ -122,14 +127,18 @@ Outputs of the main node deliberately match `ComfyUI-LLM-text-processor` and
 
 ## Providers
 
-| | CometAPI | Grokified | Coarena | Baza AI | HowToFix ID | Cloudflare | Grok Build | Custom |
-|---|---|---|---|---|---|---|---|---|
-| Base URL | `https://api.cometapi.com/v1` | `https://api.grokified.com/v1` | `https://coarena.ai/api/v1` | `https://api.baza-ai.org/v1` | `https://api.howtofix.id/v1` | `https://api.cloudflare.com/client/v4/accounts/<redacted>/ai/v1` | `https://<redacted>.tail341768.ts.net:8443/v1` | anything |
-| Default model | `grok-4.7` | `grok-4.7` | `grok-4-7` | `grok-4.7` | `grok-4.7` | `@cf/google/gemma-4-26b-a4b-it` | `grok-4.7` | `local-model` |
-| Catalogue size | 472 ids, **15** chat-capable | account-dependent | 18 ids, all chat | 44 ids | 12 ids | 1 id (static; `/v1/models` is 405) | 1 id (`grok-4.7`) | whatever it serves |
-| Reasoning levels | `minimal` `low` `medium` `high` `xhigh` `max` | `low` `medium` `high` `xhigh` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` `max` | `minimal` `low` `medium` `high` `xhigh` | `low` `medium` `high` `max` | `minimal` `low` `medium` `high` `xhigh` | all |
-| Vision (data-URI images) | yes | yes | yes | yes | yes | yes | yes (≥512 px total) | depends |
-| Streaming | yes | yes | yes (usage via `stream_options`) | yes (reasoning + usage included) | yes (reasoning + usage included) | yes (reasoning + usage included) | yes (usage via `stream_options`) | depends |
+| Provider | Base URL | Default model | Catalogue | Reasoning | Vision | Streaming |
+|---|---|---|---|---|---|---|
+| CometAPI | `https://api.cometapi.com/v1` | `grok-4.7` | 472 ids, **15** chat | `minimal` … `max` | yes | yes |
+| Grokified | `https://api.grokified.com/v1` | `grok-4.7` | account-dependent | `low` … `xhigh` | yes | yes |
+| Coarena | `https://coarena.ai/api/v1` | `grok-4-7` | 18 ids, all chat | `minimal` … `max` | yes | usage via `stream_options` |
+| Baza AI | `https://api.baza-ai.org/v1` | `grok-4.7` | 44 ids | `minimal` … `max` | yes | reasoning + usage included |
+| HowToFix ID | `https://api.howtofix.id/v1` | `grok-4.7` | 12 ids | `minimal` … `xhigh` | yes | reasoning + usage included |
+| Cloudflare | `https://api.cloudflare.com/client/v4/accounts/<redacted>/ai/v1` | `@cf/google/gemma-4-26b-a4b-it` | 1 id (static; `/v1/models` 405) | `low` … `max` | yes | reasoning + usage included |
+| Grok Build | `https://<redacted>.tail341768.ts.net:8443/v1` | `grok-4.7` | 1 id | `minimal` … `xhigh` | yes (≥512 px) | usage via `stream_options` |
+| Crusoe | `https://api.inference.crusoecloud.com/v1` | `google/gemma-4-31b-it` | 9 ids | `minimal` … `max` | yes | usage included |
+| FastRouter | `https://api.fastrouter.ai/api/v1` | `google/gemma-4-31b-it-ultra` | 292 ids → 206 chat | `minimal` … `max` | yes | reasoning + usage included |
+| Custom | anything | `local-model` | whatever it serves | all | depends | depends |
 
 Coarena's `/models` entry advertises the efforts `low` … `xhigh`, but live calls
 also accept `minimal` and `max`; the node offers all of them. Baza AI reports the
@@ -149,6 +158,14 @@ Cloudflare Workers AI needs `CLOUDFLARE_ACCOUNT_ID` for the URL and
 `/v1/models` is not supported (405), so the combo uses a static gemma fallback —
 type other `@cf/...` ids into `model_override`. Its token cap covers
 reasoning+content together, and `usage` reports Cloudflare's `neurons` cost.
+
+Crusoe returns `reasoning_tokens` at the top level of `usage` and streams usage
+by default; `gemma-4-31b-it` is multimodal (262k context).
+
+FastRouter is an OpenRouter-style aggregator: `/models` carries 292 ids and the
+node filters to text-output chat models (`architecture.modality` contains
+`->text`, which leaves 206). Usage includes `cost` in USD and the upstream
+`provider`; reasoning arrives as `reasoning` / `reasoning_details`.
 
 The node asks `GET /models` for the live list and keeps only the ids a
 `/chat/completions` call can actually serve (CometAPI tags them
@@ -375,6 +392,43 @@ returns none at all.
 
 </details>
 
+<details>
+<summary><b>Crusoe Cloud</b> — <code>google/gemma-4-31b-it</code>, 2026-11-15</summary>
+
+| Fact | Evidence |
+|---|---|
+| 9 chat/multimodal models | `/models` lists gemma-4-31b-it, GLM-5.3, Nemotron, DeepSeek and Qwen ids |
+| default model is multimodal | `/models`: image-text-to-text, 262 144 context, bf16 |
+| both token fields are honoured | `max_tokens: 16` and `max_completion_tokens: 16` both produced 16 completion tokens |
+| usage has top-level reasoning tokens | `usage.reasoning_tokens` is a top-level field (not nested) |
+| streaming includes usage | the SSE stream carried `usage` without `stream_options` |
+| reasoning is exposed | `reasoning_content` is present on messages and deltas |
+| effort `none` … `max` are accepted | HTTP 200; the literal `default` is rejected with a validation error (the node strips it) |
+| seed/temperature/top_p pass through | HTTP 200 |
+| vision works with data URIs | a 64×64 red PNG returned `Red` |
+| unknown model = **HTTP 404** `model_not_found` | `Model not found: ...` — fatal, not retried |
+| bad key = HTTP 401 | `{"errors":["Authentication failed"],...}` |
+
+</details>
+
+<details>
+<summary><b>FastRouter</b> — <code>google/gemma-4-31b-it-ultra</code>, 2026-11-15</summary>
+
+| Fact | Evidence |
+|---|---|
+| 292 models, 206 text-output | `/models`; the node keeps entries whose `architecture.modality` contains `->text` |
+| default model is multimodal | gemma-4-31b-it-ultra: `text+image->text`, supports seed/temperature/top_p |
+| both token fields are honoured | caps of 16 produced 16 completion tokens |
+| streaming includes usage | SSE carried `usage` and the upstream `provider` without `stream_options` |
+| reasoning is exposed when enabled | `reasoning` / `reasoning_details` appear for `low` … `max`; `none` omits them |
+| usage carries cost and upstream | `usage.cost` (USD) and `usage.provider` (e.g. `deepinfra`) |
+| effort `none` … `max` are accepted | HTTP 200; the literal `default` returns 422 (the node strips it) |
+| vision works with data URIs | a 64×64 red PNG returned `Red` |
+| unknown model = HTTP 400 | `... is not a valid model ID or no providers found` — fatal |
+| bad key = HTTP 401 `invalid_api_key` | `Invalid API key provided` |
+
+</details>
+
 ---
 
 ## Troubleshooting
@@ -392,6 +446,8 @@ returns none at all.
 | Cloudflare `/v1/models` shows 405 / empty combo | The OpenAI-compatible endpoint has no model list; the static gemma fallback is used. Type other `@cf/...` ids into `model_override`. |
 | Cloudflare answers 401 | Set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`; the account id is part of the URL. |
 | Cloudflare 400 `No such model` | The `@cf/...` id is wrong or not enabled for your account. |
+| Crusoe answers 401 | Set `CRUSOE_API_KEY`. |
+| FastRouter answers 401 / invalid model | Set `FASTROUTER_API_KEY`; use an exact id from `/models` in `model_override` if the combo is stale. |
 | Model dropdown looks stale | Press **🔄 Refresh model list** on the node. |
 | Dropdown is empty / status shows `⚠` | `/comfyui_llm_api/models` could not reach the gateway; the static fallback list is shown and the reason is printed in the node. |
 | Output cut off | Raise `max_tokens`; the console logs a warning when `finish_reason` is `length`. |
@@ -430,7 +486,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 327 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 372 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
@@ -442,13 +498,17 @@ GROK_BUILD_URL=https://<your-tailnet-host>:8443 GROK_API_KEY=... python tests/pr
 HOWTOFIX_API_KEY=sk-... python tests/probe_howtofix.py     # HowToFix ID capability probe
 CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=cfut_... python tests/probe_cloudflare.py
                                                            # Cloudflare Workers AI probe
+CRUSOE_API_KEY=... python tests/probe_crusoe.py            # Crusoe capability probe
+FASTROUTER_API_KEY=sk-v1-... python tests/probe_fastrouter.py
+                                                           # FastRouter capability probe
 
-# 70 checks - queues real prompts through a running ComfyUI
+# 81 checks - queues real prompts through a running ComfyUI
 # (the count varies: Coarena is skipped on model_unavailable, Grok Build when
-#  its proxy is down, HowToFix ID on read timeout, Cloudflare without env)
+#  its proxy is down, HowToFix ID on read timeout, Cloudflare without env,
+#  Crusoe/FastRouter without their API keys)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
-# 59 checks - drives a real browser against a running ComfyUI
+# 61 checks - drives a real browser against a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
@@ -461,10 +521,10 @@ node contract. It also fails if an API key is ever committed.
 vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
 Grokified 402 path when the account is unfunded, Coarena and Baza AI streamed
 calls, the Grok Build Tailscale proxy, HowToFix ID (skipped when its read times
-out), Cloudflare Workers AI, and `enable_processing = false`. If Coarena's
-gateway reports `model_unavailable`, its three live checks are skipped rather
-than failed; the Grok Build checks are skipped when the proxy is not reachable or
-`GROK_API_KEY` is missing.
+out), Cloudflare Workers AI, Crusoe and FastRouter streamed calls, and
+`enable_processing = false`. If Coarena's gateway reports `model_unavailable`,
+its three live checks are skipped rather than failed; the Grok Build checks are
+skipped when the proxy is not reachable or `GROK_API_KEY` is missing.
 
 **`tests/browser/live_test.js`** is the only thing that can prove the frontend
 half works: it loads ComfyUI in Chromium, injects a workflow whose saved

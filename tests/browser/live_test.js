@@ -124,11 +124,22 @@ async function launch() {
             return { status: r.status, body: await r.json() };
         });
         eq("providers route status", providers.status, 200);
-        eq("provider count", providers.body.providers.length, 8);
+        eq("provider count", providers.body.providers.length, 10);
         eq(
             "provider ids",
             providers.body.providers.map((p) => p.id),
-            ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "howtofix", "cloudflare", "custom"],
+            [
+                "cometapi",
+                "grokified",
+                "coarena",
+                "bazaai",
+                "grokbuild",
+                "howtofix",
+                "cloudflare",
+                "crusoe",
+                "fastrouter",
+                "custom",
+            ],
         );
         eq("default provider", providers.body.defaultProvider, "cometapi");
         check(
@@ -156,6 +167,18 @@ async function launch() {
             "cloudflare is offered",
             providers.body.providers.some(
                 (p) => p.id === "cloudflare" && p.baseUrl.endsWith("/ai/v1") && p.requiresKey === true,
+            ),
+        );
+        check(
+            "crusoe is offered",
+            providers.body.providers.some(
+                (p) => p.id === "crusoe" && p.baseUrl === "https://api.inference.crusoecloud.com/v1",
+            ),
+        );
+        check(
+            "fastrouter is offered",
+            providers.body.providers.some(
+                (p) => p.id === "fastrouter" && p.baseUrl === "https://api.fastrouter.ai/api/v1",
             ),
         );
 
@@ -314,7 +337,7 @@ async function launch() {
         check("node type is registered", !!def);
         eq("node output names", def.output_name, ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"]);
         eq("node category", def.category, "LLM/API");
-        eq("provider widget choices come from the server", def.input.required.provider[0].length, 8);
+        eq("provider widget choices come from the server", def.input.required.provider[0].length, 10);
         check("image input is optional", !!def.input.optional.image);
         check("VALIDATE_INPUTS makes the model list advisory", def.input.required.model[1].default === "grok-4.7");
 

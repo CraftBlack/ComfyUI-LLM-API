@@ -67,6 +67,9 @@ class Provider:
     model_filter_key: str = ""
     #: value that :attr:`model_filter_key` must contain.
     model_filter_value: str = ""
+    #: "exact" matches a list value; "contains" matches inside a string. Keys
+    #: may be dotted paths (FastRouter: ``architecture.modality``).
+    model_filter_mode: str = "exact"
 
     def to_dict(self) -> dict:
         """JSON shape consumed by ``web/js/llm_api.js``."""
@@ -352,6 +355,63 @@ CLOUDFLARE = Provider(
     ),
 )
 
+CRUSOE = Provider(
+    id="crusoe",
+    label="Crusoe Cloud (crusoecloud.com)",
+    base_url="https://api.inference.crusoecloud.com/v1",
+    key_env="CRUSOE_API_KEY",
+    key_hint="Crusoe API key",
+    default_model="google/gemma-4-31b-it",
+    fallback_models=(
+        "google/gemma-4-31b-it",
+        "zai-org/GLM-5.3",
+        "zai-org/GLM-5.3-Flash",
+        "openai/gpt-oss-120b",
+        "nvidia/Nemotron-3-Nano-Omni-Reasoning-30B-A3B",
+        "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
+        "nvidia/Nemotron-3.5-Lightning-30B-A3B",
+        "deepseek-ai/DeepSeek-V4.1-Flash",
+        "Qwen/Qwen3.8-27B",
+    ),
+    reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh", "max"),
+    notes=(
+        "Crusoe Cloud inference. gemma-4-31b-it is multimodal (262k context). "
+        "Usage carries top-level reasoning_tokens and cached_tokens; the stream "
+        "includes usage by default. Both token fields are honoured."
+    ),
+)
+
+FASTROUTER = Provider(
+    id="fastrouter",
+    label="FastRouter (fastrouter.ai)",
+    base_url="https://api.fastrouter.ai/api/v1",
+    key_env="FASTROUTER_API_KEY",
+    key_hint="sk-v1-...",
+    default_model="google/gemma-4-31b-it-ultra",
+    fallback_models=(
+        "google/gemma-4-31b-it-ultra",
+        "google/gemma-4-31b-it",
+        "google/gemma-4-26b-a4b-it",
+        "x-ai/grok-4.7",
+        "anthropic/claude-sonnet-5.5",
+        "openai/gpt-6.1-terra",
+        "deepseek/deepseek-v4.1-flash",
+        "qwen/qwen3.8-max",
+        "z-ai/glm-5.3",
+        "minimax/minimax-m3",
+    ),
+    reasoning_efforts=("default", "minimal", "low", "medium", "high", "xhigh", "max"),
+    model_filter_key="architecture.modality",
+    model_filter_value="->text",
+    model_filter_mode="contains",
+    notes=(
+        "OpenRouter-style aggregator: 292 ids from /models, filtered to "
+        "text-output chat models (architecture.modality contains '->text'). "
+        "Usage includes cost in USD and the upstream provider; reasoning text "
+        "is exposed as reasoning/reasoning_details."
+    ),
+)
+
 CUSTOM = Provider(
     id="custom",
     label="Custom / self-hosted (OpenAI-compatible)",
@@ -380,6 +440,8 @@ PROVIDERS: tuple[Provider, ...] = (
     GROK_BUILD,
     HOWTOFIX,
     CLOUDFLARE,
+    CRUSOE,
+    FASTROUTER,
     CUSTOM,
 )
 

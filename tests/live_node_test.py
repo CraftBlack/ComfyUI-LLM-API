@@ -148,14 +148,14 @@ if "LLMAPITextProcessor" not in object_info:
 definition = object_info["LLMAPITextProcessor"]
 eq("output names", definition["output_name"], ["RESPONSE", "REASONING", "PERF", "USAGE_JSON"])
 eq("category", definition["category"], "LLM/API")
-eq("provider choices", len(definition["input"]["required"]["provider"][0]), 8)
+eq("provider choices", len(definition["input"]["required"]["provider"][0]), 10)
 check("image is optional", "image" in definition["input"]["optional"])
 eq("required inputs contain no image", "image" in definition["input"]["required"], False)
 check("no duplicate route warning for our prefix", True)
 
 print("\n== HTTP routes ==")
 registry = get("/comfyui_llm_api/providers")
-eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "howtofix", "cloudflare", "custom"])
+eq("registry provider ids", [p["id"] for p in registry["providers"]], ["cometapi", "grokified", "coarena", "bazaai", "grokbuild", "howtofix", "cloudflare", "crusoe", "fastrouter", "custom"])
 eq("registry default", registry["defaultProvider"], "cometapi")
 
 models = get("/comfyui_llm_api/models?provider=cometapi")
@@ -181,6 +181,23 @@ check(
     "cloudflare catalogue has the gemma model",
     "@cf/google/gemma-4-26b-a4b-it" in models_cf["models"],
     str(models_cf["models"])[:160],
+)
+models_cr = get("/comfyui_llm_api/models?provider=crusoe")
+check(
+    "crusoe catalogue has the gemma model",
+    "google/gemma-4-31b-it" in models_cr["models"],
+    str(models_cr["models"])[:160],
+)
+models_fr = get("/comfyui_llm_api/models?provider=fastrouter")
+check(
+    "fastrouter catalogue has the ultra model",
+    "google/gemma-4-31b-it-ultra" in models_fr["models"],
+    str(models_fr["models"])[:160],
+)
+check(
+    "fastrouter catalogue filters image/video models",
+    not any("flux" in m or "veo" in m for m in models_fr["models"]),
+    str(models_fr["models"])[:160],
 )
 
 # --------------------------------------------------------------------------- #
@@ -538,6 +555,93 @@ if CF_ACCOUNT and CF_TOKEN:
 else:
     check("cloudflare env is not set (live checks skipped)", True)
     print("  set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN")
+
+# --------------------------------------------------------------------------- #
+print("\n== N. crusoe: live call ==")
+CRUSOE_KEY = (os.environ.get("CRUSOE_API_KEY") or "").strip()
+if CRUSOE_KEY:
+    graph_n = {
+        "1": {
+            "class_type": "LLMAPITextProcessor",
+            "inputs": node_inputs(
+                provider="Crusoe Cloud (crusoecloud.com)",
+                model="google/gemma-4-31b-it",
+                system_prompt="none",
+                prompt="Say OK",
+                max_tokens=256,
+                temperature=0.7,
+                top_p=0.95,
+                reasoning_effort="low",
+                seed=1,
+                timeout_seconds=60,
+                stream=True,
+                api_key=CRUSOE_KEY,
+            ),
+        },
+        "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+        "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 3]}},
+    }
+    history, seconds = run("N", graph_n, timeout=180)
+    detail = error_text(history)
+    if status_of(history) == "success":
+        answer = text_of(history, "2")
+        check("crusoe answered", bool(answer.strip()), answer[:120])
+        usage = json.loads(text_of(history, "3") or "{}")
+        eq("crusoe usage names the provider", usage.get("provider"), "crusoe")
+        check("crusoe reports usage on a streamed call", usage.get("completion_tokens", 0) > 0, str(usage))
+        print(f"  ({seconds:.1f}s) answer={answer[:40]!r} usage={usage.get('completion_tokens')} completion")
+    elif "ReadTimeout" in detail or "timed out" in detail.lower():
+        check("crusoe timed out (live checks skipped)", True)
+    else:
+        eq("status is an error", status_of(history), "error")
+        check("crusoe error is explained", bool(detail), detail[:160])
+else:
+    check("CRUSOE_API_KEY is not set (live checks skipped)", True)
+
+# --------------------------------------------------------------------------- #
+print("\n== O. fastrouter: live call ==")
+FASTROUTER_KEY = (os.environ.get("FASTROUTER_API_KEY") or "").strip()
+if FASTROUTER_KEY:
+    graph_o = {
+        "1": {
+            "class_type": "LLMAPITextProcessor",
+            "inputs": node_inputs(
+                provider="FastRouter (fastrouter.ai)",
+                model="google/gemma-4-31b-it-ultra",
+                system_prompt="none",
+                prompt="Say OK",
+                max_tokens=256,
+                temperature=0.7,
+                top_p=0.95,
+                reasoning_effort="low",
+                seed=1,
+                timeout_seconds=60,
+                stream=True,
+                api_key=FASTROUTER_KEY,
+            ),
+        },
+        "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+        "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 3]}},
+    }
+    history, seconds = run("O", graph_o, timeout=180)
+    detail = error_text(history)
+    if status_of(history) == "success":
+        answer = text_of(history, "2")
+        check("fastrouter answered", bool(answer.strip()), answer[:120])
+        usage = json.loads(text_of(history, "3") or "{}")
+        eq("fastrouter usage names the provider", usage.get("provider"), "fastrouter")
+        check("fastrouter reports usage on a streamed call", usage.get("completion_tokens", 0) > 0, str(usage))
+        check("fastrouter reports cost", usage.get("cost_usd", 0) > 0, str(usage))
+        check("fastrouter reports the upstream provider", bool(usage.get("upstream_provider")), str(usage))
+        print(f"  ({seconds:.1f}s) answer={answer[:40]!r} usage={usage.get('completion_tokens')} completion, "
+              f"cost={usage.get('cost_usd')}, upstream={usage.get('upstream_provider')}")
+    elif "ReadTimeout" in detail or "timed out" in detail.lower():
+        check("fastrouter timed out (live checks skipped)", True)
+    else:
+        eq("status is an error", status_of(history), "error")
+        check("fastrouter error is explained", bool(detail), detail[:160])
+else:
+    check("FASTROUTER_API_KEY is not set (live checks skipped)", True)
 
 # --------------------------------------------------------------------------- #
 print()

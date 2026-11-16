@@ -131,6 +131,23 @@ try:
 finally:
     if saved_cf_account is not None:
         os.environ["CLOUDFLARE_ACCOUNT_ID"] = saved_cf_account
+check("crusoe is registered", "crusoe" in providers.BY_ID)
+eq("crusoe base url", providers.CRUSOE.base_url, "https://api.inference.crusoecloud.com/v1")
+eq("crusoe key env", providers.CRUSOE.key_env, "CRUSOE_API_KEY")
+eq("crusoe default model", providers.CRUSOE.default_model, "google/gemma-4-31b-it")
+check("crusoe fallback has its default", "google/gemma-4-31b-it" in providers.CRUSOE.fallback_models)
+check("crusoe requires a key", providers.CRUSOE.requires_key)
+check("crusoe does not send stream_options", not providers.CRUSOE.stream_usage)
+check("fastrouter is registered", "fastrouter" in providers.BY_ID)
+eq("fastrouter base url", providers.FASTROUTER.base_url, "https://api.fastrouter.ai/api/v1")
+eq("fastrouter key env", providers.FASTROUTER.key_env, "FASTROUTER_API_KEY")
+eq("fastrouter default model", providers.FASTROUTER.default_model, "google/gemma-4-31b-it-ultra")
+check("fastrouter fallback has its default", "google/gemma-4-31b-it-ultra" in providers.FASTROUTER.fallback_models)
+check("fastrouter requires a key", providers.FASTROUTER.requires_key)
+check("fastrouter does not send stream_options", not providers.FASTROUTER.stream_usage)
+eq("fastrouter model filter key", providers.FASTROUTER.model_filter_key, "architecture.modality")
+eq("fastrouter model filter value", providers.FASTROUTER.model_filter_value, "->text")
+eq("fastrouter model filter mode", providers.FASTROUTER.model_filter_mode, "contains")
 check("cometapi keeps the default stream usage", not providers.COMETAPI.stream_usage)
 eq("cometapi default model", providers.COMETAPI.default_model, "grok-4.7")
 check("grok-4.7 in cometapi fallback list", "grok-4.7" in providers.COMETAPI.fallback_models)
@@ -162,6 +179,8 @@ check("all_models contains grokified-only model", "claude-opus-5" in models)
 check("all_models contains bazaai-only model", "gpt-5.6-sol" in models)
 check("all_models contains howtofix-only model", "big-pickle" in models)
 check("all_models contains the cloudflare model", "@cf/google/gemma-4-26b-a4b-it" in models)
+check("all_models contains the crusoe model", "google/gemma-4-31b-it" in models)
+check("all_models contains the fastrouter model", "google/gemma-4-31b-it-ultra" in models)
 
 efforts = providers.all_efforts()
 check("all_efforts is the union", {"default", "minimal", "low", "medium", "high", "xhigh", "max"} <= set(efforts))
@@ -272,6 +291,14 @@ b = client.build_body(
 )
 eq("cloudflare uses max_completion_tokens", b.get("max_completion_tokens"), 99)
 check("cloudflare does not send stream_options", "stream_options" not in b)
+
+for provider, model_id in (
+    (providers.CRUSOE, "google/gemma-4-31b-it"),
+    (providers.FASTROUTER, "google/gemma-4-31b-it-ultra"),
+):
+    b = client.build_body(provider=provider, model=model_id, messages=[], max_tokens=99, stream=True)
+    eq(f"{provider.id} uses max_completion_tokens", b.get("max_completion_tokens"), 99)
+    check(f"{provider.id} does not send stream_options", "stream_options" not in b)
 
 # --------------------------------------------------------------------------- #
 print("== client: parameter downgrade ==")
@@ -398,6 +425,37 @@ code, message = client._error_details(FakeResponse(401, cf_401))
 eq("cloudflare 401 code", code, "10000")
 eq("cloudflare 401 message", message, "Authentication error")
 
+crusoe_404 = {"code": "model_not_found", "message": "Model not found: nope/nope", "error_id": "abc"}
+code, message = client._error_details(FakeResponse(404, crusoe_404))
+eq("crusoe 404 code", code, "model_not_found")
+check("crusoe 404 is fatal", client._is_fatal(404, code, message))
+
+crusoe_401 = {"errors": ["Authentication failed"], "id": "abc"}
+code, message = client._error_details(FakeResponse(401, crusoe_401))
+eq("crusoe 401 message", message, "Authentication failed")
+
+fastrouter_400 = {
+    "error": {
+        "code": None,
+        "message": "nope/nope is not a valid model ID or no providers found ",
+        "param": None,
+        "type": "invalid_request_error",
+    }
+}
+code, message = client._error_details(FakeResponse(400, fastrouter_400))
+check("fastrouter 400 is fatal", client._is_fatal(400, code, message))
+
+fastrouter_401 = {
+    "error": {
+        "code": "invalid_api_key",
+        "message": "Invalid API key provided: *****",
+        "param": None,
+        "type": "invalid_request_error",
+    }
+}
+code, message = client._error_details(FakeResponse(401, fastrouter_401))
+eq("fastrouter 401 code", code, "invalid_api_key")
+
 check("429 is retryable", 429 in client.RETRY_STATUSES)
 check("503 is retryable", 503 in client.RETRY_STATUSES)
 check("402 is not retryable", 402 not in client.RETRY_STATUSES)
@@ -423,6 +481,19 @@ eq(
     ["grok-4.7", "black-forest-labs/flux-1.1-pro", "act_two", "deepseek-v4.1-flash"],
 )
 eq("plain string entries are accepted", client._filter_models(providers.GROKIFIED, ["a", "b", "a"]), ["a", "b"])
+
+fastrouter_models = [
+    {"id": "google/gemma-4-31b-it-ultra", "architecture": {"modality": "text+image->text"}},
+    {"id": "google/gemma-4-31b-it", "architecture": {"modality": "text+image->text"}},
+    {"id": "flux", "architecture": {"modality": "text->image"}},
+    {"id": "veo", "architecture": {"modality": "text+image->video"}},
+    {"id": "sarvam", "architecture": {"modality": "text->audio"}},
+]
+eq(
+    "fastrouter nested contains filter keeps only text-output models",
+    client._filter_models(providers.FASTROUTER, fastrouter_models),
+    ["google/gemma-4-31b-it-ultra", "google/gemma-4-31b-it"],
+)
 
 client.clear_model_cache()
 fallback, error = client.list_models(fake)
@@ -478,6 +549,14 @@ check("on_delta fired for content and reasoning", deltas.count("content") == 2 a
 broken = [b"data: {not json}", b": keep-alive comment", b"data: [DONE]"]
 out = client._parse_stream(FakeResponse(200, lines=broken), None)
 eq("malformed chunks are skipped", out["content"], "")
+
+sse_fastrouter = [
+    b'data: {"provider":"deepinfra","choices":[{"delta":{"content":"OK"}}]}',
+    b'data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}',
+    b"data: [DONE]",
+]
+out = client._parse_stream(FakeResponse(200, lines=sse_fastrouter), None)
+eq("stream captures the upstream provider", out["usage"].get("provider"), "deepinfra")
 
 # --------------------------------------------------------------------------- #
 print("== images ==")
@@ -663,6 +742,21 @@ eq("usage reads neurons", cf_numbers["neurons"], 2.5)
 cf_perf = nodes._format_perf(providers.CLOUDFLARE.label, "@cf/google/gemma-4-26b-a4b-it", cf_numbers, 1.0, False)
 check("perf shows neurons", "2.50 neurons" in cf_perf, cf_perf)
 
+crusoe_numbers = nodes._usage_numbers(
+    {"prompt_tokens": 31, "completion_tokens": 126, "reasoning_tokens": 120}
+)
+eq("usage reads top-level reasoning_tokens", crusoe_numbers["reasoning_tokens"], 120)
+
+fastrouter_numbers = nodes._usage_numbers(
+    {"prompt_tokens": 18, "completion_tokens": 55, "cost": 0.0000466, "provider": "deepinfra"}
+)
+eq("usage reads cost", fastrouter_numbers["cost_usd"], 0.0000466)
+eq("usage reads upstream provider", fastrouter_numbers["upstream_provider"], "deepinfra")
+fastrouter_perf = nodes._format_perf(
+    providers.FASTROUTER.label, "google/gemma-4-31b-it-ultra", fastrouter_numbers, 1.0, False
+)
+check("perf shows fastrouter cost", "$0.000047" in fastrouter_perf, fastrouter_perf)
+
 # model-list node with a stubbed catalogue
 original_list_models = nodes.list_models
 nodes.list_models = lambda *a, **k: (["grok-4.7", "grok-build-0.1", "deepseek-v4.1-flash"], None)
@@ -712,7 +806,10 @@ check("pyproject repository url", "github.com/CraftBlack/ComfyUI-LLM-API" in tex
 # no secret may be committed anywhere in the pack
 import re  # noqa: E402
 
-secret_re = re.compile(r"sk-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}|ks_live_[A-Za-z0-9_-]{20,}|cfut_[A-Za-z0-9]{20,}")
+secret_re = re.compile(
+    r"sk-[A-Za-z0-9]{20,}|sk-v1-[A-Za-z0-9]{20,}|coa_[A-Za-z0-9]{20,}"
+    r"|ks_live_[A-Za-z0-9_-]{20,}|cfut_[A-Za-z0-9]{20,}"
+)
 for path in ROOT.rglob("*"):
     if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
         continue

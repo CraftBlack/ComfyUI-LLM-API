@@ -187,6 +187,64 @@ node's status line.
 | `base_url` | Empty = the provider's own URL. The frontend fills it in when you switch provider; a value you typed is never overwritten. |
 | `api_key` | Empty = the provider's environment variable. |
 
+### Batch API / fallback chain
+
+`fallback_chain` (advanced) turns the node into a failover chain: the primary
+`provider` / `model` / `base_url` / `api_key` is tried first, then every entry
+below it in order, until one answers. A failing gateway — HTTP error, timeout,
+missing key, unfunded account, empty 200 — just moves on to the next one. The
+run only fails when every endpoint has failed, and the error then lists each
+attempt.
+
+One endpoint per line, `provider | model | base_url | api_key`. Only the
+provider is required; `-` leaves a slot at its default:
+
+```
+crusoe | google/gemma-4-31b-it
+fastrouter | google/gemma-4-31b-it-ultra
+custom | my-model | https://my-host/v1 | $MY_API_KEY
+```
+
+- `provider` — an id or label from the table above (`custom`, `crusoe`, ...).
+- `model` — empty = that provider's default model.
+- `base_url` — empty = that provider's own URL. This is how you point `custom`
+  at LM Studio, Ollama or vLLM.
+- `api_key` — empty = the provider's environment variable. `$VAR`, `${VAR}`
+  and `env:VAR` read the key from the environment at run time, so the secret
+  never has to sit in the workflow JSON.
+
+Shorthand `crusoe, fastrouter, coarena` works too, and JSON is accepted when an
+entry needs its own sampling overrides:
+
+```json
+[
+  {"provider": "custom", "base_url": "http://127.0.0.1:1234/v1",
+   "model": "local-model", "api_key": "$LOCAL_LLM_KEY"},
+  {"provider": "crusoe", "model": "google/gemma-4-31b-it", "max_tokens": 2048,
+   "reasoning_effort": "low"}
+]
+```
+
+JSON keys: `provider`, `model`, `base_url`, `api_key`, `reasoning_effort`,
+`max_tokens`, `temperature`, `top_p`, `seed`, `stream`, `timeout`.
+
+Behaviour notes:
+
+- The primary endpoint is always attempt #1. Listing it again in the chain is
+  ignored (same provider + model + URL), so the request is never sent twice.
+- `PERF` gains `failover after N failed attempt(s)`, and `USAGE_JSON` gains
+  `fallback_used` plus an `attempts` array (`provider`, `model`, `ok`,
+  `elapsed_seconds`, `error`) when a chain is configured.
+- With no chain the outputs are exactly what they were before.
+- A real answer is never overridden by a later endpoint; a 200 with an empty
+  response counts as a failure while a fallback remains.
+- Each endpoint still runs its own `max_attempts` retries internally, so one
+  503 does not immediately burn the whole chain. Use a per-entry `timeout` when
+  a slow gateway must not stall the rest.
+- The primary widget accepts any provider string, but a typo inside
+  `fallback_chain` fails immediately with a config error that lists the valid
+  ids.
+
 ### Generation
 
 | Widget | Default | Notes |
@@ -461,6 +519,7 @@ returns none at all.
 ```
 providers.py       provider registry (URLs, key env vars, capability flags)
 llm_api_client.py  requests-based /chat/completions client, retries, auto-downgrade
+fallback.py        fallback-chain parser (provider | model | base_url | api_key)
 images.py          IMAGE tensor -> inline image_url parts
 prompts.py         ComfyUI/models/LLM/prompts presets
 nodes.py           the two nodes
@@ -486,7 +545,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 372 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 427 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
@@ -502,10 +561,10 @@ CRUSOE_API_KEY=... python tests/probe_crusoe.py            # Crusoe capability p
 FASTROUTER_API_KEY=sk-v1-... python tests/probe_fastrouter.py
                                                            # FastRouter capability probe
 
-# 81 checks - queues real prompts through a running ComfyUI
-# (the count varies: Coarena is skipped on model_unavailable, Grok Build when
-#  its proxy is down, HowToFix ID on read timeout, Cloudflare without env,
-#  Crusoe/FastRouter without their API keys)
+# 79 checks - queues real prompts through a running ComfyUI
+# (the count varies with which provider keys are present: Coarena and Baza AI
+#  each add checks when their key is set, Grok Build when its proxy is up,
+#  HowToFix ID on read timeout, Cloudflare/Crusoe/FastRouter without env)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
 # 61 checks - drives a real browser against a running ComfyUI
@@ -513,15 +572,18 @@ COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
 **`tests/self_test.py`** loads the pack the way ComfyUI does and covers the
-request bodies, the SSE parser, the error classifier, the image pipeline and the
-node contract. It also fails if an API key is ever committed.
+request bodies, the SSE parser, the error classifier, the fallback-chain parser
+and node failover, the image pipeline and the node contract. It also fails if
+an API key is ever committed.
 
 **`tests/live_node_test.py`** builds real prompts, queues them through
 `POST /prompt` and reads `GET /history/<id>` back. It covers text, streaming,
-vision through `LoadImage`, the model-list node, a bad model id, a bad key, the
-Grokified 402 path when the account is unfunded, Coarena and Baza AI streamed
-calls, the Grok Build Tailscale proxy, HowToFix ID (skipped when its read times
-out), Cloudflare Workers AI, Crusoe and FastRouter streamed calls, and
+vision through `LoadImage`, the model-list node, a bad model id, the fallback
+chain (a dead primary falls through to the next endpoint, and an all-dead chain
+raises one `LLMAPIChainError`), a bad key, the Grokified 402 path when the
+account is unfunded, Coarena and Baza AI streamed calls, the Grok Build Tailscale
+proxy, HowToFix ID (skipped when its read times out), Cloudflare Workers AI,
+Crusoe and FastRouter streamed calls, and
 `enable_processing = false`. If Coarena's gateway reports `model_unavailable`,
 its three live checks are skipped rather than failed; the Grok Build checks are
 skipped when the proxy is not reachable or `GROK_API_KEY` is missing.

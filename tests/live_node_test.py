@@ -323,6 +323,70 @@ check("no retry storm (gave up in <60s)", elapsed < 60, f"{elapsed:.1f}s")
 print(f"  ({elapsed:.1f}s) {detail[:150]}")
 
 # --------------------------------------------------------------------------- #
+print("\n== E2. fallback chain: dead primary -> next endpoint answers ==")
+graph_e2 = {
+    "1": {
+        "class_type": "LLMAPITextProcessor",
+        "inputs": node_inputs(
+            provider="CometAPI (cometapi.com)", model="grok-4.7",
+            model_override="definitely-not-a-model",
+            system_prompt="none", prompt="Say OK", max_tokens=64, temperature=0.7, top_p=0.9,
+            reasoning_effort="default", seed=1, timeout_seconds=180, stream=False,
+            fallback_chain="cometapi | grok-4.7",
+        ),
+    },
+    "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+    "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 2]}},
+    "4": {"class_type": "PreviewAny", "inputs": {"source": ["1", 3]}},
+}
+history, seconds = run("E2", graph_e2, timeout=300)
+eq("status", status_of(history), "success")
+answer = text_of(history, "2")
+perf = text_of(history, "3")
+usage = json.loads(text_of(history, "4") or "{}")
+check("fallback answered instead of failing", bool(answer.strip()), answer[:120])
+check("perf reports the failover", "failover after 1 failed attempt(s)" in perf, perf)
+eq("usage names the endpoint that answered", usage.get("provider"), "cometapi")
+eq("usage flags fallback_used", usage.get("fallback_used"), True)
+attempts = usage.get("attempts") or []
+eq("usage lists both attempts", [a.get("ok") for a in attempts], [False, True])
+check(
+    "first attempt kept the fatal model error",
+    bool(attempts) and ("no available channel" in attempts[0].get("error", "")
+                        or "model_not_found" in attempts[0].get("error", "")),
+    json.dumps(attempts),
+)
+print(f"  ({seconds:.1f}s) answer={answer[:60]!r}")
+print(f"  perf={perf}")
+
+# --------------------------------------------------------------------------- #
+print("\n== E3. fallback chain: every endpoint failing surfaces one chain error ==")
+graph_e3 = dict(graph_e2)
+graph_e3["1"] = {
+    "class_type": "LLMAPITextProcessor",
+    "inputs": node_inputs(
+        provider="CometAPI (cometapi.com)", model="grok-4.7",
+        model_override="definitely-not-a-model",
+        system_prompt="none", prompt="hi", max_tokens=64, temperature=0.7, top_p=0.9,
+        reasoning_effort="default", seed=1, timeout_seconds=60, stream=False,
+        fallback_chain="cometapi | another-bad-model",
+    ),
+}
+started = time.perf_counter()
+history, _ = run("E3", graph_e3, timeout=180)
+elapsed = time.perf_counter() - started
+eq("status is an error", status_of(history), "error")
+detail = error_text(history)
+check("chain error says all endpoints failed", "All 2 endpoints failed" in detail, detail[:300])
+check(
+    "chain error names both endpoints",
+    "definitely-not-a-model" in detail and "another-bad-model" in detail,
+    detail[:300],
+)
+check("chain error fails fast", elapsed < 90, f"{elapsed:.1f}s")
+print(f"  ({elapsed:.1f}s) {detail[:180]}")
+
+# --------------------------------------------------------------------------- #
 print("\n== F. bad api key surfaces as a clean error ==")
 history, _ = run("F", with_preview({
     "class_type": "LLMAPITextProcessor",

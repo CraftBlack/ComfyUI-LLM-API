@@ -14,8 +14,10 @@ import json
 import logging
 import time
 
+from .fallback import ChainConfigError, build_attempts
 from .images import image_to_parts
 from .llm_api_client import (
+    LLMAPIChainError,
     LLMAPIError,
     LLMAPIKeyError,
     chat_completion,
@@ -71,7 +73,14 @@ def _usage_numbers(usage: dict) -> dict:
     return {k: v for k, v in numbers.items() if v is not None}
 
 
-def _format_perf(provider_label: str, model: str, numbers: dict, elapsed: float, streamed: bool) -> str:
+def _format_perf(
+    provider_label: str,
+    model: str,
+    numbers: dict,
+    elapsed: float,
+    streamed: bool,
+    fallback: str = "",
+) -> str:
     parts = [model or "?"]
     prompt_tokens = numbers.get("prompt_tokens")
     completion_tokens = numbers.get("completion_tokens")
@@ -97,6 +106,8 @@ def _format_perf(provider_label: str, model: str, numbers: dict, elapsed: float,
             parts.append(f"{float(numbers['neurons']):.2f} neurons")
         except (TypeError, ValueError):
             pass
+    if fallback:
+        parts.append(fallback)
     return f"{provider_label.split(' (')[0]} | " + " | ".join(parts)
 
 
@@ -253,6 +264,17 @@ class LLMAPITextProcessor:
                     "tooltip": 'Optional JSON merged into the request body, e.g. {"stop": ["\\n\\n"]}.',
                     "advanced": True,
                 }),
+                "fallback_chain": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": (
+                        "Batch API / failover: one endpoint per line, "
+                        "'provider | model | base_url | api_key'. When an endpoint fails the "
+                        "next one is tried, including custom URLs. Also accepts JSON. "
+                        "Empty = no fallback."
+                    ),
+                    "advanced": True,
+                }),
                 "enable_processing": ("BOOLEAN", {
                     "default": True,
                     "tooltip": "When disabled, the input prompt is forwarded to RESPONSE without calling the API.",
@@ -291,6 +313,7 @@ class LLMAPITextProcessor:
         max_tokens_param: str = MAX_TOKENS_PARAM,
         extra_body_json: str = "",
         enable_processing: bool = True,
+        fallback_chain: str = "",
     ):
         selected = get_provider(provider)
 
@@ -299,23 +322,29 @@ class LLMAPITextProcessor:
 
         chosen_model = (model_override or "").strip() or (model or "").strip()
 
-        key = resolve_api_key(selected, api_key)
-        if not key and selected.requires_key:
-            raise LLMAPIKeyError(
-                f"No API key for {selected.label}. Paste it into the api_key field or set "
-                f"the {selected.key_env} environment variable, then retry."
+        try:
+            attempts = build_attempts(
+                selected,
+                model=chosen_model,
+                base_url=base_url,
+                api_key=api_key,
+                fallback_chain=fallback_chain,
             )
+        except ChainConfigError as exc:
+            raise LLMAPIError(f"fallback_chain is invalid: {exc}") from exc
 
         system_text, warnings = build_system_prompt(system_prompt, system_prompt_text)
         for warning in warnings:
             LOGGER.warning("[LLMAPI] %s", warning)
 
+        # A mixed chain must only send fields every endpoint understands, so an
+        # image detail hint is dropped as soon as one entry cannot take it.
         parts, image_warnings = image_to_parts(
             image,
             detail=image_detail,
             max_side=max_image_side,
             max_images=max_images,
-            supports_detail=selected.supports_detail,
+            supports_detail=all(entry.provider.supports_detail for entry in attempts),
         )
         for warning in image_warnings:
             LOGGER.warning("[LLMAPI] %s", warning)
@@ -354,45 +383,146 @@ class LLMAPITextProcessor:
             if progress_step % 4 == 0:
                 progress.update(4)  # update() is relative; ProgressBar clamps to total
 
-        effective_base = (base_url or "").strip() or selected.base_url
-        LOGGER.info(
-            "[LLMAPI] %s | %s -> %s | %d image(s) | max_tokens=%s (%s) effort=%s stream=%s",
-            selected.id,
-            chosen_model,
-            effective_base,
-            len(parts),
-            max_tokens,
-            max_tokens_param,
-            reasoning_effort,
-            bool(stream),
-        )
-
+        trace: list[dict] = []
+        failures: list[dict] = []
+        winner = None
+        chain_mode = len(attempts) > 1
         started = time.perf_counter()
-        result = chat_completion(
-            messages=messages,
-            model=chosen_model,
-            provider=selected,
-            base_url=effective_base,
-            api_key=key,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            seed=seed,
-            reasoning_effort=reasoning_effort,
-            timeout=float(timeout_seconds),
-            stream=bool(stream),
-            max_tokens_param=max_tokens_param,
-            extra_body=extra_body,
-            max_attempts=selected.max_attempts,
-            on_delta=on_delta if progress is not None else None,
-        )
+
+        for index, entry in enumerate(attempts):
+            attempt_started = time.perf_counter()
+            label = f"{entry.provider.id}:{entry.model_id}"
+            attempt_effort = entry.reasoning_effort or reasoning_effort
+            attempt_stream = bool(stream) if entry.stream is None else bool(entry.stream)
+            attempt_max_tokens = max_tokens if entry.max_tokens is None else entry.max_tokens
+            attempt_temperature = temperature if entry.temperature is None else entry.temperature
+            attempt_top_p = top_p if entry.top_p is None else entry.top_p
+            attempt_seed = seed if entry.seed is None else entry.seed
+            attempt_timeout = (
+                float(timeout_seconds) if entry.timeout is None else float(entry.timeout)
+            )
+            effective_base = entry.base_url or entry.provider.base_url
+            attempt_record = {"attempt": index + 1, "provider": entry.provider.id, "model": entry.model_id}
+
+            while True:  # single pass; a loop keeps the failure bookkeeping in one place
+                key = resolve_api_key(entry.provider, entry.api_key)
+                if not key and entry.provider.requires_key:
+                    failure = LLMAPIKeyError(
+                        f"No API key for {entry.provider.label}. Paste it into the api_key "
+                        f"field, set the {entry.provider.key_env} environment variable, or "
+                        "reference it inside fallback_chain with $VAR_NAME."
+                    )
+                    break
+
+                LOGGER.info(
+                    "[LLMAPI] attempt %d/%d | %s | %s | %d image(s) | max_tokens=%s (%s) effort=%s stream=%s",
+                    index + 1,
+                    len(attempts),
+                    entry.provider.id,
+                    entry.model_id,
+                    len(parts),
+                    attempt_max_tokens,
+                    max_tokens_param,
+                    attempt_effort,
+                    attempt_stream,
+                )
+
+                try:
+                    result = chat_completion(
+                        messages=messages,
+                        model=entry.model_id,
+                        provider=entry.provider,
+                        base_url=effective_base,
+                        api_key=key,
+                        max_tokens=attempt_max_tokens,
+                        temperature=attempt_temperature,
+                        top_p=attempt_top_p,
+                        seed=attempt_seed,
+                        reasoning_effort=attempt_effort,
+                        timeout=attempt_timeout,
+                        stream=attempt_stream,
+                        max_tokens_param=max_tokens_param,
+                        extra_body=extra_body,
+                        max_attempts=entry.provider.max_attempts,
+                        on_delta=on_delta if progress is not None else None,
+                    )
+                except LLMAPIError as exc:
+                    failure = exc
+                    break
+
+                response_text = result.get("content") or ""
+                reasoning_text = result.get("reasoning") or ""
+                if not response_text and not result.get("refusal") and index < len(attempts) - 1:
+                    failure = LLMAPIError("the gateway returned an empty response")
+                    break
+
+                winner = (
+                    entry,
+                    result,
+                    response_text,
+                    reasoning_text,
+                    attempt_effort,
+                    attempt_stream,
+                    effective_base,
+                    attempt_max_tokens,
+                )
+                attempt_record["model"] = result.get("model") or entry.model_id
+                break
+
+            attempt_record["elapsed_seconds"] = round(time.perf_counter() - attempt_started, 3)
+            if winner is not None:
+                attempt_record["ok"] = True
+                trace.append(attempt_record)
+                break
+
+            attempt_record["ok"] = False
+            attempt_record["error"] = str(failure)
+            trace.append(attempt_record)
+            failures.append(
+                {
+                    "provider": entry.provider.id,
+                    "model": entry.model_id,
+                    "error": str(failure),
+                    "exception": failure,
+                }
+            )
+            if index < len(attempts) - 1:
+                LOGGER.warning(
+                    "[LLMAPI] %s failed, trying the next fallback (%s): %s",
+                    label,
+                    attempts[index + 1].provider.id,
+                    failure,
+                )
+                continue
+            break
+
         elapsed = time.perf_counter() - started
+
+        if winner is None:
+            if len(attempts) == 1:
+                raise failures[0]["exception"]
+            details = "; ".join(
+                f"{item['provider']} / {item['model']}: {item['error']}" for item in failures
+            )
+            raise LLMAPIChainError(
+                f"All {len(attempts)} endpoints failed. {details}",
+                failures=[{k: v for k, v in item.items() if k != "exception"} for item in failures],
+            ) from failures[-1]["exception"]
+
+        (
+            entry,
+            result,
+            response_text,
+            reasoning_text,
+            attempt_effort,
+            attempt_stream,
+            effective_base,
+            attempt_max_tokens,
+        ) = winner
 
         for note in result.get("notes") or []:
             LOGGER.warning("[LLMAPI] %s", note)
 
-        response_text = result.get("content") or ""
-        reasoning_text = result.get("reasoning") or ""
         if not response_text and result.get("refusal"):
             response_text = str(result["refusal"])
             LOGGER.warning("[LLMAPI] model refused the request; returned the refusal text")
@@ -400,7 +530,7 @@ class LLMAPITextProcessor:
         if result.get("finish_reason") == "length":
             LOGGER.warning(
                 "[LLMAPI] output hit max_tokens=%s; raise it if the response looks cut off",
-                max_tokens,
+                attempt_max_tokens,
             )
 
         numbers = _usage_numbers(result.get("usage") or {})
@@ -418,31 +548,37 @@ class LLMAPITextProcessor:
             notes.append(note)
             LOGGER.warning("[LLMAPI] %s", note)
 
-        reported_model = result.get("model") or chosen_model
-        usage_json = json.dumps(
-            {
-                "provider": selected.id,
-                "provider_label": selected.label,
-                "base_url": result.get("base_url") or effective_base,
-                "model": reported_model,
-                "requested_model": chosen_model,
-                "reasoning_effort": reasoning_effort,
-                "finish_reason": result.get("finish_reason"),
-                "streamed": result.get("streamed"),
-                "elapsed_seconds": round(elapsed, 3),
-                "images_sent": len(parts),
-                "reasoning_chars": len(reasoning_text),
-                "notes": notes,
-                **numbers,
-            },
-            ensure_ascii=False,
-        )
+        reported_model = result.get("model") or entry.model_id
+        payload = {
+            "provider": entry.provider.id,
+            "provider_label": entry.provider.label,
+            "base_url": result.get("base_url") or effective_base,
+            "model": reported_model,
+            "requested_model": entry.model_id,
+            "reasoning_effort": attempt_effort,
+            "finish_reason": result.get("finish_reason"),
+            "streamed": result.get("streamed"),
+            "elapsed_seconds": round(elapsed, 3),
+            "images_sent": len(parts),
+            "reasoning_chars": len(reasoning_text),
+            "notes": notes,
+            **numbers,
+        }
+        if chain_mode:
+            payload["fallback_used"] = bool(failures)
+            payload["attempts"] = trace
+        usage_json = json.dumps(payload, ensure_ascii=False)
+
+        fallback_label = ""
+        if failures:
+            fallback_label = f"failover after {len(failures)} failed attempt(s)"
         perf = _format_perf(
-            result.get("provider_label") or selected.label,
+            result.get("provider_label") or entry.provider.label,
             reported_model,
             numbers,
             elapsed,
             bool(result.get("streamed")),
+            fallback=fallback_label,
         )
 
         if response_text:

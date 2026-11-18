@@ -32,6 +32,7 @@ from importlib import import_module  # noqa: E402
 
 providers = import_module(f"{PACKAGE}.providers")
 client = import_module(f"{PACKAGE}.llm_api_client")
+fallback = import_module(f"{PACKAGE}.fallback")
 images = import_module(f"{PACKAGE}.images")
 nodes = import_module(f"{PACKAGE}.nodes")
 prompts = import_module(f"{PACKAGE}.prompts")
@@ -496,8 +497,8 @@ eq(
 )
 
 client.clear_model_cache()
-fallback, error = client.list_models(fake)
-eq("no key -> static fallback", fallback, ["m"])
+static_models, error = client.list_models(fake)
+eq("no key -> static fallback", static_models, ["m"])
 check("no key -> error explains why", "no API key" in (error or ""))
 eq("cached_models works offline", client.cached_models(fake), ["m"])
 
@@ -610,6 +611,90 @@ eq("missing preset -> empty text", text, "")
 check("missing preset warns", len(warns) == 1 and "was not found" in warns[0])
 
 # --------------------------------------------------------------------------- #
+print("== fallback chain ==")
+entries = fallback.parse_chain("crusoe | google/gemma-4-31b-it\nfastrouter | x")
+eq("line syntax parses two entries", [e.provider.id for e in entries], ["crusoe", "fastrouter"])
+eq("line syntax keeps the model", entries[0].model, "google/gemma-4-31b-it")
+eq("empty model means provider default", fallback.parse_chain("fastrouter")[0].model_id, providers.FASTROUTER.default_model)
+eq("empty text -> empty chain", fallback.parse_chain("  \n "), [])
+eq("comment-only text -> empty chain", fallback.parse_chain("# nothing here"), [])
+eq("comments are skipped inside line syntax", len(fallback.parse_chain("# skip\ncrusoe")), 1)
+eq("dash placeholders mean default", fallback.parse_chain("crusoe | - | ~ | none")[0].model, "")
+
+os.environ["LLM_TEST_CHAIN_KEY"] = "chain-secret"
+try:
+    entry = fallback.parse_chain("custom | m | https://example.test/v1 | $LLM_TEST_CHAIN_KEY")[0]
+    eq("$VAR api key expanded", entry.api_key, "chain-secret")
+    entry = fallback.parse_chain("custom | m | https://example.test/v1 | ${LLM_TEST_CHAIN_KEY}")[0]
+    eq("${VAR} api key expanded", entry.api_key, "chain-secret")
+    entry = fallback.parse_chain("custom | m | https://example.test/v1 | env:LLM_TEST_CHAIN_KEY")[0]
+    eq("env:VAR api key expanded", entry.api_key, "chain-secret")
+    entry = fallback.parse_chain("custom | m | $LLM_TEST_CHAIN_MISSING")[0]
+    eq("missing env var expands to empty", entry.api_key, "")
+finally:
+    os.environ.pop("LLM_TEST_CHAIN_KEY", None)
+
+eq("comma shorthand", [e.provider.id for e in fallback.parse_chain("crusoe, fastrouter; coarena")],
+   ["crusoe", "fastrouter", "coarena"])
+eq("comma shorthand uses default models",
+   [e.model_id for e in fallback.parse_chain("crusoe, fastrouter")],
+   [providers.CRUSOE.default_model, providers.FASTROUTER.default_model])
+
+json_chain = fallback.parse_chain(json.dumps([
+    {"provider": "custom", "model": "local", "base_url": "http://127.0.0.1:1234/v1", "api_key": "$NOPE"},
+    "crusoe | google/gemma-4-31b-it",
+]))
+eq("json syntax parses objects and strings", [e.provider.id for e in json_chain], ["custom", "crusoe"])
+eq("json base_url kept", json_chain[0].base_url, "http://127.0.0.1:1234/v1")
+eq("json missing env key -> empty", json_chain[0].api_key, "")
+wrapped = fallback.parse_chain(json.dumps({"chain": [{"provider": "crusoe"}]}))
+eq("json object wrapper accepted", [e.provider.id for e in wrapped], ["crusoe"])
+int_chain = fallback.parse_chain(json.dumps([{"provider": "crusoe", "max_tokens": 128, "timeout": 12.5,
+                                             "stream": "false", "seed": "7"}]))
+eq("json per-entry max_tokens", int_chain[0].max_tokens, 128)
+eq("json per-entry timeout", int_chain[0].timeout, 12.5)
+eq("json per-entry stream", int_chain[0].stream, False)
+eq("json per-entry seed", int_chain[0].seed, 7)
+eq("json per-entry reasoning effort", fallback.parse_chain(
+    json.dumps([{"provider": "crusoe", "reasoning_effort": "low"}])
+)[0].reasoning_effort, "low")
+
+try:
+    fallback.parse_chain("nope | m")
+    check("unknown provider is rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("unknown provider is rejected", "unknown provider" in str(exc))
+
+try:
+    fallback.parse_chain("a | b | c | d | e")
+    check("too many line fields rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("too many line fields rejected", "at most 4 fields" in str(exc))
+
+try:
+    fallback.parse_chain("[{not json")
+    check("bad json rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("bad json rejected", "not valid JSON" in str(exc))
+
+try:
+    fallback.parse_chain(json.dumps([{"provider": "crusoe", "temperature": "hot"}]))
+    check("bad number rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("bad number rejected", "must be a number" in str(exc))
+
+primary = providers.get_provider(providers.COMETAPI.label)
+attempts = fallback.build_attempts(
+    primary, model="grok-4.7", api_key="k",
+    fallback_chain="cometapi | grok-4.7\ncrusoe | google/gemma-4-31b-it",
+)
+eq("primary comes first", attempts[0].provider.id, "cometapi")
+eq("duplicate primary is dropped", [e.provider.id for e in attempts], ["cometapi", "crusoe"])
+eq("primary keeps the widget model", attempts[0].model, "grok-4.7")
+eq("primary widget key carried", attempts[0].api_key, "k")
+eq("no chain -> one attempt", len(fallback.build_attempts(primary, model="m")), 1)
+
+# --------------------------------------------------------------------------- #
 print("== nodes ==")
 node = nodes.LLMAPITextProcessor()
 types = node.INPUT_TYPES()
@@ -620,7 +705,7 @@ for key in ("provider", "model", "system_prompt", "prompt", "max_tokens", "tempe
             "reasoning_effort", "seed", "timeout_seconds"):
     check(f"required input '{key}'", key in required)
 for key in ("image", "system_prompt_text", "api_key", "base_url", "model_override", "stream",
-            "max_tokens_param", "extra_body_json", "enable_processing"):
+            "max_tokens_param", "extra_body_json", "enable_processing", "fallback_chain"):
     check(f"optional input '{key}'", key in optional)
 
 eq("provider default", required["provider"][1]["default"], providers.DEFAULT_PROVIDER.label)
@@ -719,6 +804,135 @@ finally:
 # provider label -> provider resolution inside the node
 eq("node resolves the grokified label", providers.get_provider(providers.GROKIFIED.label).key_env, "GROKIFIED_API_KEY")
 
+# --------------------------------------------------------------------------- #
+print("== nodes: fallback chain ==")
+
+
+def _stub_result(provider, model):
+    return {
+        "content": "from " + provider.id,
+        "reasoning": "",
+        "usage": {"total_tokens": 1},
+        "notes": [],
+        "provider": provider.id,
+        "provider_label": provider.label,
+        "base_url": "http://stub",
+        "model": model,
+        "streamed": False,
+        "finish_reason": "stop",
+    }
+
+
+common = dict(
+    provider=providers.COMETAPI.label, model="grok-4.7", system_prompt="none", prompt="hi",
+    max_tokens=16, temperature=0.7, top_p=0.9, reasoning_effort="high", seed=1,
+    timeout_seconds=30, stream=False,
+)
+custom_chain = "custom | local-model | http://127.0.0.1:9/v1 | dummy"
+original_chat_completion = nodes.chat_completion
+saved_comet = os.environ.pop("COMETAPI_API_KEY", None)
+saved_llm = os.environ.pop("LLM_API_KEY", None)
+try:
+    seen: list[str] = []
+
+    def fail_primary(**kwargs):
+        seen.append(kwargs["provider"].id)
+        if kwargs["provider"].id == "cometapi":
+            raise client.LLMAPIError("primary down")
+        return _stub_result(kwargs["provider"], kwargs["model"])
+
+    nodes.chat_completion = fail_primary
+    result = node.generate(**common, api_key="dummy", fallback_chain=custom_chain)
+    eq("fallback answers after the primary fails", result[0], "from custom")
+    eq("both endpoints were called in order", seen, ["cometapi", "custom"])
+    payload = json.loads(result[3])
+    eq("usage reports the fallback provider", payload["provider"], "custom")
+    eq("usage flags the failover", payload["fallback_used"], True)
+    eq("usage lists both attempts", [a["ok"] for a in payload["attempts"]], [False, True])
+    eq("failed attempt keeps its error", payload["attempts"][0]["error"], "primary down")
+    check("perf mentions the failover", "failover after 1 failed attempt(s)" in result[2], result[2])
+
+    def empty_primary(**kwargs):
+        if kwargs["provider"].id == "cometapi":
+            return {**_stub_result(kwargs["provider"], kwargs["model"]), "content": ""}
+        return _stub_result(kwargs["provider"], kwargs["model"])
+
+    nodes.chat_completion = empty_primary
+    result = node.generate(**common, api_key="dummy", fallback_chain=custom_chain)
+    eq("empty response falls over to the next endpoint", result[0], "from custom")
+    eq(
+        "empty response recorded as a failed attempt",
+        [a.get("error") for a in json.loads(result[3])["attempts"]],
+        ["the gateway returned an empty response", None],
+    )
+
+    def fail_all(**kwargs):
+        raise client.LLMAPIError(f"{kwargs['provider'].id} down")
+
+    nodes.chat_completion = fail_all
+    try:
+        node.generate(**common, api_key="dummy", fallback_chain=custom_chain)
+        check("all endpoints failing raises", False, "no exception raised")
+    except client.LLMAPIChainError as exc:
+        check("all endpoints failing raises LLMAPIChainError", True)
+        check("chain error names both endpoints", "cometapi" in str(exc) and "custom" in str(exc), str(exc))
+        eq("chain error keeps structured failures", len(exc.failures), 2)
+
+    try:
+        node.generate(**common, api_key="dummy")
+        check("single endpoint failure raises", False, "no exception raised")
+    except client.LLMAPIChainError:
+        check("single endpoint failure is not wrapped in a chain error", False, "got LLMAPIChainError")
+    except client.LLMAPIError as exc:
+        check("single endpoint failure raises the original error", "down" in str(exc), str(exc))
+
+    # a missing primary key is just another failure, so the chain still runs
+    def never_fails(**kwargs):
+        return _stub_result(kwargs["provider"], kwargs["model"])
+
+    nodes.chat_completion = never_fails
+    result = node.generate(**common, api_key="", fallback_chain=custom_chain)
+    eq("missing primary key falls over", result[0], "from custom")
+
+    # no chain configured -> the old usage shape is unchanged
+    result = node.generate(**common, api_key="dummy")
+    check("no chain -> usage has no attempts key", "attempts" not in json.loads(result[3]))
+
+    try:
+        node.generate(**common, api_key="dummy", fallback_chain="not-a-provider")
+        check("bad chain rejected", False, "no exception raised")
+    except client.LLMAPIError as exc:
+        check("bad chain rejected", "fallback_chain is invalid" in str(exc), str(exc))
+
+    captured_override: dict = {}
+
+    def capture_fallback(**kwargs):
+        if kwargs["provider"].id == "cometapi":
+            raise client.LLMAPIError("primary down")
+        captured_override.update(kwargs)
+        return _stub_result(kwargs["provider"], kwargs["model"])
+
+    nodes.chat_completion = capture_fallback
+    node.generate(
+        **common,
+        api_key="dummy",
+        fallback_chain=json.dumps([{
+            "provider": "custom", "model": "m2", "base_url": "http://127.0.0.1:1234/v1",
+            "api_key": "k2", "max_tokens": 7, "stream": False,
+        }]),
+    )
+    eq("entry model override used", captured_override.get("model"), "m2")
+    eq("entry base_url override used", captured_override.get("base_url"), "http://127.0.0.1:1234/v1")
+    eq("entry max_tokens override used", captured_override.get("max_tokens"), 7)
+    eq("entry key used", captured_override.get("api_key"), "k2")
+    eq("entry stream override used", captured_override.get("stream"), False)
+finally:
+    nodes.chat_completion = original_chat_completion
+    if saved_comet is not None:
+        os.environ["COMETAPI_API_KEY"] = saved_comet
+    if saved_llm is not None:
+        os.environ["LLM_API_KEY"] = saved_llm
+
 perf = nodes._format_perf(providers.COMETAPI.label, "grok-4.7",
                           {"prompt_tokens": 1248, "completion_tokens": 58, "reasoning_tokens": 56}, 2.1, True)
 check("perf mentions the provider", perf.startswith("CometAPI |"))
@@ -796,7 +1010,8 @@ check("js has no unbalanced brace count", js.count("{") == js.count("}"))
 # --------------------------------------------------------------------------- #
 print("== repository hygiene ==")
 for name in ("README.md", "LICENSE", "pyproject.toml", "requirements.txt", ".gitignore", "providers.py",
-             "llm_api_client.py", "nodes.py", "images.py", "prompts.py", "routes.py", "__init__.py"):
+             "llm_api_client.py", "fallback.py", "nodes.py", "images.py", "prompts.py", "routes.py",
+             "__init__.py"):
     check(f"{name} exists", (ROOT / name).is_file())
 
 text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

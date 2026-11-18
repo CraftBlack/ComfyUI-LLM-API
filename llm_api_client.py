@@ -77,6 +77,14 @@ class LLMAPIQuotaError(LLMAPIError):
     """The account has no credit / no active plan (HTTP 402)."""
 
 
+class LLMAPIChainError(LLMAPIError):
+    """Every endpoint in the fallback chain failed."""
+
+    def __init__(self, message: str, failures: list[dict] | None = None):
+        super().__init__(message)
+        self.failures = failures or []
+
+
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #

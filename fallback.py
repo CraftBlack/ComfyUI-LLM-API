@@ -11,11 +11,12 @@ Line syntax - one endpoint per line, ``#`` starts a comment::
 
     crusoe | google/gemma-4-31b-it
     fastrouter | google/gemma-4-31b-it-ultra
-    custom | my-model | https://my-host/v1 | $MY_API_KEY
+    custom | my-model | $MY_API_KEY
 
 Only the provider is required; the other slots may be left empty or written as
-``-``. ``api_key`` and ``base_url`` accept ``$ENV_VAR`` / ``env:ENV_VAR`` so the
-secret does not have to live in the workflow JSON.
+``-``. The provider may be an id or its display name without the domain suffix
+(``crusoe``, ``Crusoe Cloud``, ``CRUSOE``). ``api_key`` accepts ``$ENV_VAR`` /
+``env:ENV_VAR`` so the secret does not have to live in the workflow JSON.
 
 JSON syntax::
 
@@ -123,6 +124,20 @@ def _as_bool(value: Any, field: str) -> bool | None:
     raise ChainConfigError(f"{field} must be true/false, got {text!r}")
 
 
+def _alias_key(text: str) -> str:
+    """Letters and digits only, lowercased: 'Crusoe Cloud' -> 'crusoecloud'."""
+    return re.sub(r"[^0-9a-z]+", "", text.casefold())
+
+
+def _provider_names(provider: Provider) -> set[str]:
+    """Names a provider may be written as in the chain."""
+    short = re.sub(r"\s*\([^)]*\)", "", provider.label).strip()
+    names = {provider.id, provider.label, short}
+    if short:
+        names.add(short.split()[0])
+    return {key for name in names if (key := _alias_key(name))}
+
+
 def _resolve_provider(value: Any) -> Provider:
     text = _clean(value)
     if not text:
@@ -133,10 +148,17 @@ def _resolve_provider(value: Any) -> Provider:
             if provider.label.lower() == text.lower():
                 found = provider
                 break
-    if found is None:
-        known = ", ".join(p.id for p in PROVIDERS)
-        raise ChainConfigError(f"unknown provider {text!r}; use one of: {known}")
-    return found
+    if found is not None:
+        return found
+    key = _alias_key(text)
+    matches = [p for p in PROVIDERS if key and key in _provider_names(p)]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        ids = ", ".join(p.id for p in matches)
+        raise ChainConfigError(f"provider {text!r} is ambiguous; write one of: {ids}")
+    known = ", ".join(p.id for p in PROVIDERS)
+    raise ChainConfigError(f"unknown provider {text!r}; use one of: {known}")
 
 
 # --------------------------------------------------------------------------- #

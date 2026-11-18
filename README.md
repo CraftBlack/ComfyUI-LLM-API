@@ -208,7 +208,8 @@ grokified | grok-4.7
 fastrouter | google/gemma-4-31b-it-ultra | $FASTROUTER_API_KEY
 ```
 
-- `provider` — an id or label from the table above.
+- `provider` — an id (`crusoe`) or the name from the dropdown without the domain
+  suffix (`Crusoe Cloud`, `CRUSOE`, `crusoe cloud`). Case and spaces are ignored.
 - `model` — empty = that provider's default model.
 - `api_key` — empty = the provider's environment variable. `$VAR`, `${VAR}`
   and `env:VAR` read the key from the environment at run time, so the secret
@@ -564,7 +565,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 446 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 464 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways

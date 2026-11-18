@@ -665,6 +665,33 @@ try:
 except fallback.ChainConfigError as exc:
     check("unknown provider is rejected", "unknown provider" in str(exc))
 
+for text, expected in (
+    ("crusoe", "crusoe"),
+    ("CRUSOE", "crusoe"),
+    ("Crusoe Cloud", "crusoe"),
+    ("crusoe cloud", "crusoe"),
+    ("CrusoeCloud", "crusoe"),
+    ("crusoe-cloud", "crusoe"),
+    ("Crusoe Cloud (crusoecloud.com)", "crusoe"),
+    ("CometAPI", "cometapi"),
+    ("comet api", "cometapi"),
+    ("Cloudflare", "cloudflare"),
+    ("Cloudflare Workers AI", "cloudflare"),
+    ("Grok Build", "grokbuild"),
+    ("Grokified", "grokified"),
+    ("Baza AI", "bazaai"),
+    ("HowToFix ID", "howtofix"),
+    ("FastRouter", "fastrouter"),
+    ("Custom", "custom"),
+):
+    eq(f"chain accepts provider {text!r}", fallback.parse_chain(text)[0].provider.id, expected)
+
+try:
+    fallback.parse_chain("Crusoe Cloudy")
+    check("unknown bare name is rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("unknown bare name is rejected", "unknown provider" in str(exc))
+
 try:
     fallback.parse_chain("a | b | c | d | e")
     check("too many line fields rejected", False, "no exception raised")

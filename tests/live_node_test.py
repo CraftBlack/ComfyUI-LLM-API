@@ -357,7 +357,7 @@ graph_e3["1"] = {
         model_override="definitely-not-a-model",
         system_prompt="none", prompt="hi", max_tokens=64, temperature=0.7, top_p=0.9,
         reasoning_effort="default", seed=1, timeout_seconds=60, stream=False,
-        fallback_chain="crusoe | google/gemma-4-31b-it | sk-not-a-real-key",
+        fallback_chain="Crusoe Cloud | google/gemma-4-31b-it | sk-not-a-real-key",
     ),
 }
 started = time.perf_counter()

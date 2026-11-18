@@ -189,7 +189,9 @@ node's status line.
 
 ### Batch API / fallback chain
 
-`fallback_chain` (advanced) turns the node into a failover chain: the primary
+`fallback_chain` is a plain text box on the node (empty by default — nothing is
+pre-filled and no model list is injected); you type the endpoints yourself. It
+turns the node into a failover chain: the primary
 `provider` / `model` / `base_url` / `api_key` is tried first, then every entry
 below it in order, until one answers. A failing gateway — HTTP error, timeout,
 missing key, unfunded account, empty 200 — just moves on to the next one. The
@@ -211,7 +213,15 @@ custom | my-model | https://my-host/v1 | $MY_API_KEY
   at LM Studio, Ollama or vLLM.
 - `api_key` — empty = the provider's environment variable. `$VAR`, `${VAR}`
   and `env:VAR` read the key from the environment at run time, so the secret
-  never has to sit in the workflow JSON.
+  never has to sit in the workflow JSON. This column is where extra keys go;
+  the node's own `api_key` widget stays a single key for the selected provider.
+
+To rotate keys on one provider and model, list it again with a different key:
+
+```
+cometapi | grok-4.7 | - | $COMETAPI_KEY_A
+cometapi | grok-4.7 | - | $COMETAPI_KEY_B
+```
 
 Shorthand `crusoe, fastrouter, coarena` works too, and JSON is accepted when an
 entry needs its own sampling overrides:
@@ -231,7 +241,8 @@ JSON keys: `provider`, `model`, `base_url`, `api_key`, `reasoning_effort`,
 Behaviour notes:
 
 - The primary endpoint is always attempt #1. Listing it again in the chain is
-  ignored (same provider + model + URL), so the request is never sent twice.
+  ignored only when provider, model, URL and effective key all match, so the
+  same request is never sent twice; a different key keeps the entry (rotation).
 - `PERF` gains `failover after N failed attempt(s)`, and `USAGE_JSON` gains
   `fallback_used` plus an `attempts` array (`provider`, `model`, `ok`,
   `elapsed_seconds`, `error`) when a chain is configured.

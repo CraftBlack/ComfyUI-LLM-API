@@ -268,12 +268,12 @@ class LLMAPITextProcessor:
                     "default": "",
                     "multiline": True,
                     "tooltip": (
-                        "Batch API / failover: one endpoint per line, "
-                        "'provider | model | base_url | api_key'. When an endpoint fails the "
-                        "next one is tried, including custom URLs. Also accepts JSON. "
-                        "Empty = no fallback."
+                        "Batch API / failover, typed by hand: one endpoint per line, "
+                        "'provider | model | base_url | api_key'. If an endpoint fails, "
+                        "the next line is tried, including custom URLs. Repeat the same "
+                        "provider and model with a different api_key to rotate keys. "
+                        "Also accepts JSON. Empty = no fallback."
                     ),
-                    "advanced": True,
                 }),
                 "enable_processing": ("BOOLEAN", {
                     "default": True,

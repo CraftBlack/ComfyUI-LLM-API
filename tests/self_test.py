@@ -686,12 +686,23 @@ except fallback.ChainConfigError as exc:
 primary = providers.get_provider(providers.COMETAPI.label)
 attempts = fallback.build_attempts(
     primary, model="grok-4.7", api_key="k",
-    fallback_chain="cometapi | grok-4.7\ncrusoe | google/gemma-4-31b-it",
+    fallback_chain="cometapi | grok-4.7 | - | k\ncrusoe | google/gemma-4-31b-it",
 )
 eq("primary comes first", attempts[0].provider.id, "cometapi")
 eq("duplicate primary is dropped", [e.provider.id for e in attempts], ["cometapi", "crusoe"])
 eq("primary keeps the widget model", attempts[0].model, "grok-4.7")
 eq("primary widget key carried", attempts[0].api_key, "k")
+rotated = fallback.build_attempts(
+    primary, model="grok-4.7", api_key="k",
+    fallback_chain="cometapi | grok-4.7 | - | k2",
+)
+eq("same endpoint with another key stays", len(rotated), 2)
+eq("the rotated key is the one written", rotated[1].api_key, "k2")
+same_env = fallback.build_attempts(
+    primary, model="grok-4.7",
+    fallback_chain="cometapi | grok-4.7\ncometapi | grok-4.7",
+)
+eq("repeated no-key lines collapse to one", len(same_env), 1)
 eq("no chain -> one attempt", len(fallback.build_attempts(primary, model="m")), 1)
 
 # --------------------------------------------------------------------------- #

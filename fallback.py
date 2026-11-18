@@ -241,8 +241,10 @@ def build_attempts(
 ) -> list[ChainEntry]:
     """The primary endpoint followed by every configured fallback.
 
-    Repeating an endpoint (same provider, model and base URL) is dropped, so a
-    chain that also lists the primary does not send the same request twice.
+    Repeating the exact same request (provider, model, base URL and effective
+    key) is dropped, so a chain that also lists the primary does not send it
+    twice. The same provider and model with a different key is a separate
+    attempt, which is how key rotation is expressed.
     """
     attempts = [
         ChainEntry(
@@ -258,12 +260,13 @@ def build_attempts(
     seen: set[tuple] = set()
     unique: list[ChainEntry] = []
     for entry in attempts:
-        # Same gateway + model + URL is the same request, whatever key or
-        # sampling overrides were written next to it.
+        # Same gateway + model + URL + key is the same request. A different key
+        # is a different credential, so it stays as its own attempt.
         identity = (
             entry.provider.id,
             entry.model_id,
             entry.base_url or entry.provider.base_url,
+            entry.api_key or (os.environ.get(entry.provider.key_env) or "").strip(),
         )
         if identity in seen:
             continue

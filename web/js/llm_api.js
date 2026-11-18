@@ -241,6 +241,23 @@ const BUILTIN_REGISTRY = {
 // --------------------------------------------------------------------------- //
 const findWidget = (node, name) => (node?.widgets || []).find((w) => w.name === name);
 
+// ComfyUI labels an empty multiline widget with its own name as the
+// placeholder, which reads like a caption. Say what goes in the box instead.
+const FALLBACK_PLACEHOLDER = "provider | model | base_url | api_key  (one endpoint per line)";
+
+function decorateFallbackWidget(node) {
+    const widget = findWidget(node, "fallback_chain");
+    if (!widget) return;
+    const element =
+        widget.inputEl ||
+        widget.element?.querySelector?.("textarea") ||
+        (widget.element?.tagName === "TEXTAREA" ? widget.element : null);
+    if (!element || element.tagName !== "TEXTAREA") return;
+    if (!element.placeholder || element.placeholder === "fallback_chain") {
+        element.placeholder = FALLBACK_PLACEHOLDER;
+    }
+}
+
 function unique(list) {
     return [...new Set((list || []).map((v) => String(v ?? "").trim()).filter(Boolean))];
 }
@@ -481,6 +498,10 @@ app.registerExtension({
         if (node.comfyClass !== NODE_CLASS) return;
 
         ensureRefreshButton(node);
+        decorateFallbackWidget(node);
+        // the Vue node shell may mount its textarea a tick later
+        setTimeout(() => decorateFallbackWidget(node), 0);
+        setTimeout(() => decorateFallbackWidget(node), 300);
 
         const providerWidget = findWidget(node, "provider");
         if (providerWidget) {
@@ -508,6 +529,7 @@ app.registerExtension({
         const providerWidget = findWidget(node, "provider");
         await applyProvider(node, providerWidget?.value);
         ensureRefreshButton(node);
+        decorateFallbackWidget(node);
     },
 });
 
@@ -521,5 +543,7 @@ window.__LLM_API__ = {
     applyProvider,
     setComboValues,
     findWidget,
+    decorateFallbackWidget,
+    FALLBACK_PLACEHOLDER,
     modelCache,
 };

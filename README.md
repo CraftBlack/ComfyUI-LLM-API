@@ -190,7 +190,8 @@ node's status line.
 ### Batch API / fallback chain
 
 `fallback_chain` is a plain text box on the node (empty by default — nothing is
-pre-filled and no model list is injected); you type the endpoints yourself. It
+pre-filled and no model list is injected); you type the endpoints yourself, and
+the placeholder shows the column order. It
 turns the node into a failover chain: the primary
 `provider` / `model` / `base_url` / `api_key` is tried first, then every entry
 below it in order, until one answers. A failing gateway — HTTP error, timeout,
@@ -556,7 +557,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 430 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 431 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways

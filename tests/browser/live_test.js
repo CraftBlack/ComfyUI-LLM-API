@@ -236,6 +236,12 @@ async function launch() {
                 effortValues: w("reasoning_effort")?.options?.values ?? null,
                 baseUrl: w("base_url")?.value,
                 apiKeyPlaceholder: w("api_key")?.options?.placeholder,
+                fallbackPlaceholder:
+                    w("fallback_chain")?.inputEl?.placeholder ??
+                    w("fallback_chain")?.element?.querySelector?.("textarea")?.placeholder ??
+                    null,
+                fallbackIsDom: !!(w("fallback_chain")?.inputEl || w("fallback_chain")?.element),
+                fallbackAdvanced: w("fallback_chain")?.options?.advanced ?? null,
                 maxTokens: w("max_tokens")?.value,
                 temperature: w("temperature")?.value,
                 status: el?.textContent ?? null,
@@ -243,9 +249,20 @@ async function launch() {
             };
         });
 
-        for (const name of ["provider", "model", "reasoning_effort", "base_url", "api_key", "model_override", "max_tokens_param"]) {
+        for (const name of ["provider", "model", "reasoning_effort", "base_url", "api_key", "model_override", "max_tokens_param", "fallback_chain"]) {
             check(`widget '${name}' exists`, summary.widgetNames.includes(name));
         }
+        check(
+            "fallback_chain is an editable textarea",
+            summary.fallbackIsDom,
+            JSON.stringify(summary.widgetNames),
+        );
+        eq("fallback_chain is not hidden as advanced", summary.fallbackAdvanced, false);
+        eq(
+            "fallback_chain placeholder explains the format",
+            summary.fallbackPlaceholder,
+            "provider | model | base_url | api_key  (one endpoint per line)",
+        );
         check(
             "refresh button widget exists",
             summary.widgetNames.some((n) => String(n).includes("Refresh model list")),

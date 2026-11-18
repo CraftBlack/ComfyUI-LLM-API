@@ -1016,6 +1016,7 @@ check("js guards on comfyClass", 'node.comfyClass !== NODE_CLASS' in js)
 check("js narrows the model combo", "setComboValues" in js)
 check("js narrows the effort combo", 'findWidget(node, "reasoning_effort")' in js)
 check("js has a refresh button", "Refresh model list" in js)
+check("js explains the fallback box", "decorateFallbackWidget" in js and "provider | model | base_url | api_key" in js)
 check("js has no unbalanced brace count", js.count("{") == js.count("}"))
 
 # --------------------------------------------------------------------------- #

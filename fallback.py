@@ -143,16 +143,20 @@ def _resolve_provider(value: Any) -> Provider:
 # entry construction
 # --------------------------------------------------------------------------- #
 def _from_parts(parts: list[str], source: str) -> ChainEntry:
-    if len(parts) > 4:
+    """Build an entry from ``provider | model | api_key``.
+
+    The line syntax deliberately has no base_url slot: a URL typed in the key
+    position would be an easy mistake. Per-entry ``base_url`` is only available
+    through the JSON form.
+    """
+    if len(parts) > 3:
         raise ChainConfigError(
-            "a fallback line has at most 4 fields: provider | model | base_url | api_key"
+            "a fallback line has at most 3 fields: provider | model | api_key"
         )
-    parts = parts + [""] * (4 - len(parts))
     return ChainEntry(
         provider=_resolve_provider(parts[0]),
-        model=_clean(parts[1]),
-        base_url=_expand_env(parts[2]),
-        api_key=_expand_env(parts[3]),
+        model=_clean(parts[1]) if len(parts) > 1 else "",
+        api_key=_expand_env(_clean(parts[2])) if len(parts) > 2 else "",
         source=source,
     )
 
@@ -231,6 +235,19 @@ def parse_chain(text: str | None) -> list[ChainEntry]:
     return entries
 
 
+def _split_keys(value: str | None) -> list[str]:
+    """Split the api_key widget into one key per attempt.
+
+    ``key1,key2`` (commas and/or newlines) rotates keys on the provider that
+    is selected in the dropdown. A single key behaves exactly as before.
+    """
+    raw = _clean(value)
+    if not raw:
+        return [""]
+    keys = [_expand_env(part) for part in re.split(r"[,\n\r]+", raw) if part.strip()]
+    return keys or [""]
+
+
 def build_attempts(
     primary: Provider,
     *,
@@ -241,21 +258,40 @@ def build_attempts(
 ) -> list[ChainEntry]:
     """The primary endpoint followed by every configured fallback.
 
+    A comma-separated ``api_key`` becomes several attempts on the same
+    provider and model (key rotation) before any fallback entry is reached.
+    For that reason the selected provider may not be listed in the chain
+    again; it raises instead of being silently dropped. ``custom`` is the one
+    exception: another custom entry is allowed as long as its base URL differs,
+    because there the URL identifies the endpoint.
+
     Repeating the exact same request (provider, model, base URL and effective
-    key) is dropped, so a chain that also lists the primary does not send it
-    twice. The same provider and model with a different key is a separate
-    attempt, which is how key rotation is expressed.
+    key) is dropped, so duplicates inside the chain do not send it twice.
     """
+    primary_base = _expand_env(base_url) or primary.base_url
+    keys = _split_keys(api_key)
     attempts = [
         ChainEntry(
             provider=primary,
             model=_clean(model),
             base_url=_expand_env(base_url),
-            api_key=_expand_env(api_key),
-            source="primary",
+            api_key=key,
+            source="primary" if index == 0 else f"primary#{index + 1}",
         )
+        for index, key in enumerate(keys)
     ]
-    attempts.extend(parse_chain(fallback_chain))
+    chain = parse_chain(fallback_chain)
+    for entry in chain:
+        if entry.provider.id != primary.id:
+            continue
+        same_url = (entry.base_url or entry.provider.base_url) == primary_base
+        if entry.provider.id != "custom" or same_url:
+            raise ChainConfigError(
+                f"{entry.provider.label} is already the selected provider; put its "
+                "extra keys in the api_key widget as key1,key2,... and list only "
+                "other providers in fallback_chain"
+            )
+    attempts.extend(chain)
 
     seen: set[tuple] = set()
     unique: list[ChainEntry] = []

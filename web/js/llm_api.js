@@ -243,7 +243,7 @@ const findWidget = (node, name) => (node?.widgets || []).find((w) => w.name === 
 
 // ComfyUI labels an empty multiline widget with its own name as the
 // placeholder, which reads like a caption. Say what goes in the box instead.
-const FALLBACK_PLACEHOLDER = "provider | model | base_url | api_key  (one endpoint per line)";
+const FALLBACK_PLACEHOLDER = "provider | model | api_key  (one endpoint per line)";
 
 function decorateFallbackWidget(node) {
     const widget = findWidget(node, "fallback_chain");

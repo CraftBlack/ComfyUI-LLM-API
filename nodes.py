@@ -219,7 +219,12 @@ class LLMAPITextProcessor:
                 }),
                 "api_key": ("STRING", {
                     "default": "",
-                    "tooltip": "API key. Empty = read the provider's environment variable (COMETAPI_API_KEY / GROKIFIED_API_KEY).",
+                    "tooltip": (
+                        "API key. Empty = read the provider's environment variable "
+                        "(COMETAPI_API_KEY / GROKIFIED_API_KEY). Batch keys: separate several "
+                        "keys with commas (key1,key2,key3) to retry the same provider with the "
+                        "next key when one is rejected or out of credit."
+                    ),
                     "advanced": True,
                 }),
                 "base_url": ("STRING", {
@@ -269,10 +274,9 @@ class LLMAPITextProcessor:
                     "multiline": True,
                     "tooltip": (
                         "Batch API / failover, typed by hand: one endpoint per line, "
-                        "'provider | model | base_url | api_key'. If an endpoint fails, "
-                        "the next line is tried, including custom URLs. Repeat the same "
-                        "provider and model with a different api_key to rotate keys. "
-                        "Also accepts JSON. Empty = no fallback."
+                        "'provider | model | api_key'. The provider selected above cannot "
+                        "appear here - put several keys for it in the api_key widget as "
+                        "key1,key2,... Also accepts JSON. Empty = no fallback."
                     ),
                 }),
                 "enable_processing": ("BOOLEAN", {

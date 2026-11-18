@@ -51,7 +51,8 @@ ship with ComfyUI, so there is normally nothing to install.
 
 A key is resolved in this order:
 
-1. the node's **`api_key`** widget (advanced),
+1. the node's **`api_key`** widget (advanced) — one key, or several separated
+   by commas to retry the selected provider with the next key,
 2. the provider's **environment variable**.
 
 | Provider | Environment variable | Where to get one |
@@ -185,7 +186,7 @@ node's status line.
 | `model` | Live catalogue for the selected provider. |
 | `model_override` | Type any id to bypass the dropdown — required for custom endpoints. |
 | `base_url` | Empty = the provider's own URL. The frontend fills it in when you switch provider; a value you typed is never overwritten. |
-| `api_key` | Empty = the provider's environment variable. |
+| `api_key` | Empty = the provider's environment variable. `key1,key2,...` rotates keys on this provider. |
 
 ### Batch API / fallback chain
 
@@ -199,30 +200,35 @@ missing key, unfunded account, empty 200 — just moves on to the next one. The
 run only fails when every endpoint has failed, and the error then lists each
 attempt.
 
-One endpoint per line, `provider | model | base_url | api_key`. Only the
-provider is required; `-` leaves a slot at its default:
+One endpoint per line, exactly `provider | model | api_key`:
 
 ```
-crusoe | google/gemma-4-31b-it
-fastrouter | google/gemma-4-31b-it-ultra
-custom | my-model | https://my-host/v1 | $MY_API_KEY
+crusoe | google/gemma-4-31b-it | $CRUSOE_API_KEY
+grokified | grok-4.7
+fastrouter | google/gemma-4-31b-it-ultra | $FASTROUTER_API_KEY
 ```
 
-- `provider` — an id or label from the table above (`custom`, `crusoe`, ...).
+- `provider` — an id or label from the table above.
 - `model` — empty = that provider's default model.
-- `base_url` — empty = that provider's own URL. This is how you point `custom`
-  at LM Studio, Ollama or vLLM.
 - `api_key` — empty = the provider's environment variable. `$VAR`, `${VAR}`
   and `env:VAR` read the key from the environment at run time, so the secret
-  never has to sit in the workflow JSON. This column is where extra keys go;
-  the node's own `api_key` widget stays a single key for the selected provider.
+  never has to sit in the workflow JSON.
 
-To rotate keys on one provider and model, list it again with a different key:
+The line syntax has no `base_url` column on purpose: a URL typed in the key
+position is an easy mistake. A per-entry URL is only available in the JSON form
+below.
+
+**The provider selected in the dropdown cannot appear in the chain.** Keys for
+that provider go in the node's own `api_key` widget instead, separated by
+commas; every key is tried on the same provider and model before the chain is
+touched:
 
 ```
-cometapi | grok-4.7 | - | $COMETAPI_KEY_A
-cometapi | grok-4.7 | - | $COMETAPI_KEY_B
+api_key: sk-live-key-1,sk-live-key-2,sk-live-key-3
 ```
+
+Spaces after the commas and one-key-per-line are both accepted. A key that is
+rejected, out of credit or rate-limited simply hands over to the next key.
 
 Shorthand `crusoe, fastrouter, coarena` works too, and JSON is accepted when an
 entry needs its own sampling overrides:
@@ -241,9 +247,10 @@ JSON keys: `provider`, `model`, `base_url`, `api_key`, `reasoning_effort`,
 
 Behaviour notes:
 
-- The primary endpoint is always attempt #1. Listing it again in the chain is
-  ignored only when provider, model, URL and effective key all match, so the
-  same request is never sent twice; a different key keeps the entry (rotation).
+- The primary endpoint is always attempt #1 and the extra keys from `api_key`
+  are attempts #2, #3, ... before any chain entry. Listing the selected
+  provider in the chain is a config error, so the two mechanisms never overlap;
+  `custom` may only repeat with a different `base_url` (another server).
 - `PERF` gains `failover after N failed attempt(s)`, and `USAGE_JSON` gains
   `fallback_used` plus an `attempts` array (`provider`, `model`, `ok`,
   `elapsed_seconds`, `error`) when a chain is configured.
@@ -531,7 +538,7 @@ returns none at all.
 ```
 providers.py       provider registry (URLs, key env vars, capability flags)
 llm_api_client.py  requests-based /chat/completions client, retries, auto-downgrade
-fallback.py        fallback-chain parser (provider | model | base_url | api_key)
+fallback.py        fallback-chain parser (provider | model | api_key)
 images.py          IMAGE tensor -> inline image_url parts
 prompts.py         ComfyUI/models/LLM/prompts presets
 nodes.py           the two nodes
@@ -557,7 +564,7 @@ pack when two custom nodes register the same route, and generic names like
 Three suites, all green on ComfyUI 0.43.0 / frontend 1.58.5.
 
 ```bash
-python tests/self_test.py            # 431 checks - offline, no network, no ComfyUI
+python tests/self_test.py            # 446 checks - offline, no network, no ComfyUI
 
 COMETAPI_API_KEY=sk-... python tests/probe_cometapi.py     # live capability probe
 COMETAPI_API_KEY=sk-... python tests/probe_calibrate.py    # effort scaling, both gateways
@@ -573,7 +580,7 @@ CRUSOE_API_KEY=... python tests/probe_crusoe.py            # Crusoe capability p
 FASTROUTER_API_KEY=sk-v1-... python tests/probe_fastrouter.py
                                                            # FastRouter capability probe
 
-# 79 checks - queues real prompts through a running ComfyUI
+# 84 checks - queues real prompts through a running ComfyUI
 # (the count varies with which provider keys are present: Coarena and Baza AI
 #  each add checks when their key is set, Grok Build when its proxy is up,
 #  HowToFix ID on read timeout, Cloudflare/Crusoe/FastRouter without env)
@@ -591,8 +598,9 @@ an API key is ever committed.
 **`tests/live_node_test.py`** builds real prompts, queues them through
 `POST /prompt` and reads `GET /history/<id>` back. It covers text, streaming,
 vision through `LoadImage`, the model-list node, a bad model id, the fallback
-chain (a dead primary falls through to the next endpoint, and an all-dead chain
-raises one `LLMAPIChainError`), a bad key, the Grokified 402 path when the
+chain (repeating the selected provider is rejected with a config error, and an
+all-dead chain raises one `LLMAPIChainError`), batch keys in `api_key` (a dead
+key hands over to the next key), a bad key, the Grokified 402 path when the
 account is unfunded, Coarena and Baza AI streamed calls, the Grok Build Tailscale
 proxy, HowToFix ID (skipped when its read times out), Cloudflare Workers AI,
 Crusoe and FastRouter streamed calls, and

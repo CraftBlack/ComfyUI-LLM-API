@@ -619,15 +619,15 @@ eq("empty model means provider default", fallback.parse_chain("fastrouter")[0].m
 eq("empty text -> empty chain", fallback.parse_chain("  \n "), [])
 eq("comment-only text -> empty chain", fallback.parse_chain("# nothing here"), [])
 eq("comments are skipped inside line syntax", len(fallback.parse_chain("# skip\ncrusoe")), 1)
-eq("dash placeholders mean default", fallback.parse_chain("crusoe | - | ~ | none")[0].model, "")
+eq("dash placeholders mean default", fallback.parse_chain("crusoe | - | ~")[0].model, "")
 
 os.environ["LLM_TEST_CHAIN_KEY"] = "chain-secret"
 try:
-    entry = fallback.parse_chain("custom | m | https://example.test/v1 | $LLM_TEST_CHAIN_KEY")[0]
+    entry = fallback.parse_chain("custom | m | $LLM_TEST_CHAIN_KEY")[0]
     eq("$VAR api key expanded", entry.api_key, "chain-secret")
-    entry = fallback.parse_chain("custom | m | https://example.test/v1 | ${LLM_TEST_CHAIN_KEY}")[0]
+    entry = fallback.parse_chain("custom | m | ${LLM_TEST_CHAIN_KEY}")[0]
     eq("${VAR} api key expanded", entry.api_key, "chain-secret")
-    entry = fallback.parse_chain("custom | m | https://example.test/v1 | env:LLM_TEST_CHAIN_KEY")[0]
+    entry = fallback.parse_chain("custom | m | env:LLM_TEST_CHAIN_KEY")[0]
     eq("env:VAR api key expanded", entry.api_key, "chain-secret")
     entry = fallback.parse_chain("custom | m | $LLM_TEST_CHAIN_MISSING")[0]
     eq("missing env var expands to empty", entry.api_key, "")
@@ -669,7 +669,7 @@ try:
     fallback.parse_chain("a | b | c | d | e")
     check("too many line fields rejected", False, "no exception raised")
 except fallback.ChainConfigError as exc:
-    check("too many line fields rejected", "at most 4 fields" in str(exc))
+    check("too many line fields rejected", "at most 3 fields" in str(exc))
 
 try:
     fallback.parse_chain("[{not json")
@@ -684,26 +684,62 @@ except fallback.ChainConfigError as exc:
     check("bad number rejected", "must be a number" in str(exc))
 
 primary = providers.get_provider(providers.COMETAPI.label)
-attempts = fallback.build_attempts(
-    primary, model="grok-4.7", api_key="k",
-    fallback_chain="cometapi | grok-4.7 | - | k\ncrusoe | google/gemma-4-31b-it",
+
+three = fallback.parse_chain("crusoe | google/gemma-4-31b-it | sk-test-key")[0]
+eq("3-field key goes to api_key", three.api_key, "sk-test-key")
+eq("3-field key leaves base_url empty", three.base_url, "")
+
+try:
+    fallback.parse_chain("crusoe | m | https://alt.test/v1 | sk-key")
+    check("4-field line rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("4-field line rejected", "at most 3 fields" in str(exc))
+
+keys = fallback.build_attempts(primary, model="grok-4.7", api_key="k1,k2,k3")
+eq("comma keys become attempts", [e.api_key for e in keys], ["k1", "k2", "k3"])
+eq("comma keys keep one provider", {e.provider.id for e in keys}, {"cometapi"})
+eq("comma keys keep one model", {e.model_id for e in keys}, {"grok-4.7"})
+eq("first key is the primary", keys[0].source, "primary")
+eq("later keys are numbered", keys[1].source, "primary#2")
+spaced = fallback.build_attempts(primary, model="m", api_key=" k1 , k2 \n k3 ")
+eq("spaced and multiline keys trimmed", [e.api_key for e in spaced], ["k1", "k2", "k3"])
+eq("single key stays one attempt", len(fallback.build_attempts(primary, model="m", api_key="k")), 1)
+
+mixed = fallback.build_attempts(
+    primary, model="grok-4.7", api_key="k1,k2",
+    fallback_chain="crusoe | google/gemma-4-31b-it",
 )
-eq("primary comes first", attempts[0].provider.id, "cometapi")
-eq("duplicate primary is dropped", [e.provider.id for e in attempts], ["cometapi", "crusoe"])
-eq("primary keeps the widget model", attempts[0].model, "grok-4.7")
-eq("primary widget key carried", attempts[0].api_key, "k")
-rotated = fallback.build_attempts(
-    primary, model="grok-4.7", api_key="k",
-    fallback_chain="cometapi | grok-4.7 | - | k2",
-)
-eq("same endpoint with another key stays", len(rotated), 2)
-eq("the rotated key is the one written", rotated[1].api_key, "k2")
-same_env = fallback.build_attempts(
-    primary, model="grok-4.7",
-    fallback_chain="cometapi | grok-4.7\ncometapi | grok-4.7",
-)
-eq("repeated no-key lines collapse to one", len(same_env), 1)
+eq("keys run before the chain", [e.provider.id for e in mixed], ["cometapi", "cometapi", "crusoe"])
+eq("chain entry keeps its model", mixed[2].model, "google/gemma-4-31b-it")
 eq("no chain -> one attempt", len(fallback.build_attempts(primary, model="m")), 1)
+
+for label, chain in (
+    ("same provider in chain rejected", "cometapi | grok-4.7"),
+    ("same provider with a key rejected", "cometapi | grok-4.7 | sk-key"),
+):
+    try:
+        fallback.build_attempts(primary, model="grok-4.7", fallback_chain=chain)
+        check(label, False, "no exception raised")
+    except fallback.ChainConfigError as exc:
+        check(label, "already the selected provider" in str(exc))
+
+custom = providers.BY_ID["custom"]
+try:
+    fallback.build_attempts(
+        custom, model="a", base_url="http://127.0.0.1:1234/v1",
+        fallback_chain="custom | b",
+    )
+    check("duplicate custom endpoint rejected", False, "no exception raised")
+except fallback.ChainConfigError as exc:
+    check("duplicate custom endpoint rejected", "already the selected provider" in str(exc))
+two_custom = fallback.build_attempts(
+    custom, model="a", base_url="http://127.0.0.1:1234/v1",
+    fallback_chain=json.dumps([
+        {"provider": "custom", "model": "b", "base_url": "http://127.0.0.1:9999/v1"}
+    ]),
+)
+eq("json can point a custom fallback at another server", [e.base_url for e in two_custom],
+   ["http://127.0.0.1:1234/v1", "http://127.0.0.1:9999/v1"])
 
 # --------------------------------------------------------------------------- #
 print("== nodes ==")
@@ -839,7 +875,7 @@ common = dict(
     max_tokens=16, temperature=0.7, top_p=0.9, reasoning_effort="high", seed=1,
     timeout_seconds=30, stream=False,
 )
-custom_chain = "custom | local-model | http://127.0.0.1:9/v1 | dummy"
+custom_chain = "custom | local-model | dummy"
 original_chat_completion = nodes.chat_completion
 saved_comet = os.environ.pop("COMETAPI_API_KEY", None)
 saved_llm = os.environ.pop("LLM_API_KEY", None)
@@ -862,6 +898,34 @@ try:
     eq("usage lists both attempts", [a["ok"] for a in payload["attempts"]], [False, True])
     eq("failed attempt keeps its error", payload["attempts"][0]["error"], "primary down")
     check("perf mentions the failover", "failover after 1 failed attempt(s)" in result[2], result[2])
+
+    # batch keys in api_key rotate on the selected provider before the chain
+    seen_keys: list[str] = []
+
+    def key_rotation(**kwargs):
+        seen_keys.append(kwargs["api_key"])
+        if kwargs["api_key"] == "bad-key":
+            raise client.LLMAPIKeyError("the key was rejected")
+        return _stub_result(kwargs["provider"], kwargs["model"])
+
+    nodes.chat_completion = key_rotation
+    result = node.generate(**common, api_key="bad-key, good-key")
+    eq("second batch key answers", result[0], "from cometapi")
+    eq("both batch keys were tried", seen_keys, ["bad-key", "good-key"])
+    key_payload = json.loads(result[3])
+    eq("batch key failover is flagged", key_payload["fallback_used"], True)
+    eq("batch key attempts", [a["ok"] for a in key_payload["attempts"]], [False, True])
+    check("perf mentions the key failover", "failover after 1 failed attempt(s)" in result[2], result[2])
+
+    try:
+        node.generate(**common, api_key="dummy", fallback_chain="cometapi | grok-4.7")
+        check("chain cannot repeat the selected provider", False, "no exception raised")
+    except client.LLMAPIError as exc:
+        check(
+            "chain cannot repeat the selected provider",
+            "already the selected provider" in str(exc),
+            str(exc),
+        )
 
     def empty_primary(**kwargs):
         if kwargs["provider"].id == "cometapi":
@@ -1016,7 +1080,7 @@ check("js guards on comfyClass", 'node.comfyClass !== NODE_CLASS' in js)
 check("js narrows the model combo", "setComboValues" in js)
 check("js narrows the effort combo", 'findWidget(node, "reasoning_effort")' in js)
 check("js has a refresh button", "Refresh model list" in js)
-check("js explains the fallback box", "decorateFallbackWidget" in js and "provider | model | base_url | api_key" in js)
+check("js explains the fallback box", "decorateFallbackWidget" in js and "provider | model | api_key" in js)
 check("js has no unbalanced brace count", js.count("{") == js.count("}"))
 
 # --------------------------------------------------------------------------- #

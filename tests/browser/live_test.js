@@ -261,7 +261,7 @@ async function launch() {
         eq(
             "fallback_chain placeholder explains the format",
             summary.fallbackPlaceholder,
-            "provider | model | base_url | api_key  (one endpoint per line)",
+            "provider | model | api_key  (one endpoint per line)",
         );
         check(
             "refresh button widget exists",

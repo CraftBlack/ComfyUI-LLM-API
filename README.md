@@ -579,7 +579,7 @@ FASTROUTER_API_KEY=sk-v1-... python tests/probe_fastrouter.py
 #  HowToFix ID on read timeout, Cloudflare/Crusoe/FastRouter without env)
 COMFY_URL=http://127.0.0.1:8188 python tests/live_node_test.py
 
-# 61 checks - drives a real browser against a running ComfyUI
+# 65 checks - drives a real browser against a running ComfyUI
 COMFY_URL=http://127.0.0.1:8188 node tests/browser/live_test.js
 ```
 
